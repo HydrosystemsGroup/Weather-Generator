@@ -1,9 +1,11 @@
 Package: weatherGen
 Type: Package
-Title: What the package does (short line)
-Version: 1.0
+Title: Daily weather generator for evaluating system vulnerability to climate
+    change.
+Version: 0.1
 Date: 2014-07-23
-Author: Who wrote it
-Maintainer: Who to complain to <yourfault@somewhere.net>
-Description: More about what it does (maybe more than one line)
-License: What license is it under?
+Author: Jeffrey D. Walker <jeff@walkerjeff.com>
+Maintainer: Jeffrey D. Walker <jeff@walkerjeff.com>
+Description: Use this package to generate synthetic time series of
+    precipitation and air temperature based on observed datasets.
+License: MIT
