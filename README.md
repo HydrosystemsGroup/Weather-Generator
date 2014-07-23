@@ -1,4 +1,4 @@
-Weather Generator Package
+weatherGen Package
 =========================
 
 Jeffrey D. Walker, PhD
@@ -14,4 +14,5 @@ This package must be installed from github using devtools.
 ```R
 library(devtools)
 install_github('walkerjeffd/r-weathergen')
+library(weatherGen)
 ```
