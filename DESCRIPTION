@@ -9,3 +9,7 @@ Maintainer: Jeffrey D. Walker <jeff@walkerjeff.com>
 Description: Use this package to generate synthetic time series of
     precipitation and air temperature based on observed datasets.
 License: MIT
+VignetteBuilder: knitr
+Suggests:
+    knitr,
+    rmarkdown

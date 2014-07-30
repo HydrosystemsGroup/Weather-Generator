@@ -1,22 +1,16 @@
-#' k-Nearest Neighbors of monthly climate
+#' Wavelet analysis of annual timeseries
 #'
-#' @param CLIMATE_VARIABLE annual timeseries of observed climate variable (e.g. precipitation)
-#' @param siglvl significance level
-#' @param background_noise type of background noise (white, red)
-#' @param plot_flag boolean flag to show plots
+#' @param x annual values of climate timeseries (e.g. precipitation) as numeric array
+#' @param sig significance level
+#' @param noise.type type of background noise ("white" or "red")
+#' @param plot.flag boolean flag to show plots
 #' @export
 #' @examples
-#' WAVELET_ANALYSIS(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag)
+#' wavelet_annual(x=c(354.2, 234.4, 343), sig=0.90, noise.type="white", plot.flag=TRUE)
 
-WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag) {
-	if (missing(plot_flag)) {plot_flag <- TRUE}
-	if (missing(siglvl)) {siglvl <- 0.90}
-	if (missing(background_noise)) {background_noise <- "white"}
-
-  # wavelet analysis ----
-
+wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
   #....construct time series to analyze, pad if necessary
-	CURRENT_CLIMATE_VARIABLE_org <- CLIMATE_VARIABLE
+	CURRENT_CLIMATE_VARIABLE_org <- x
 	variance1 <- var(CURRENT_CLIMATE_VARIABLE_org)
 	n1 <- length(CURRENT_CLIMATE_VARIABLE_org)
 	CURRENT_CLIMATE_VARIABLE <- scale(CURRENT_CLIMATE_VARIABLE_org)
@@ -67,8 +61,8 @@ WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag)
 	Cdelta <- empir[2]     # reconstruction factor
 	gamma_fac <- empir[3]  # time-decorrelation factor
 	dj0 <- empir[4]       # scale-decorrelation factor
-	if (background_noise=="white") {lag1 <- 0}    #for red noise background, lag1 autocorrelation = 0.72, for white noise background, lag1 autocorrelation = 0
-	if (background_noise=="red") {lag1 <- .72}
+	if (noise.type=="white") {lag1 <- 0}    #for red noise background, lag1 autocorrelation = 0.72, for white noise background, lag1 autocorrelation = 0
+	if (noise.type=="red") {lag1 <- .72}
 
 	freq <- dt / period   # normalized frequency
 	fft_theor <- (1-lag1^2) / (1-2*lag1*cos(freq*2*pi)+lag1^2)  # [Eqn(16)]
@@ -76,7 +70,7 @@ WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag)
 	dof <- dofmin
 
 	#ENTIRE POWER SPECTRUM
-	chisquare <- qchisq(siglvl,dof)/dof
+	chisquare <- qchisq(sig, dof)/dof
 	signif <- fft_theor*chisquare   # [Eqn(18)]
 	sig95 <- ((signif))%o%(array(1,n1))  # expand signif --> (J+1)x(N) array
 	sig95 <- POWER / sig95         # where ratio > 1, power is significant
@@ -91,14 +85,14 @@ WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag)
 	chisquare_GWS <- array(NA,(J+1))
 	signif_GWS <- array(NA,(J+1))
 	for (a1 in 1:(J+1)) {
-		chisquare_GWS[a1] <- qchisq(siglvl,dof[a1])/dof[a1]
+		chisquare_GWS[a1] <- qchisq(sig,dof[a1])/dof[a1]
 		signif_GWS[a1] <- fft_theor[a1]*variance1*chisquare_GWS[a1]
 	}
 
   # plotting ----
 	period_lower_limit <- 0
 	sig_periods <- which(GWS>signif_GWS & period > period_lower_limit)
-	if (plot_flag) {
+	if (plot.flag) {
 		par(mfrow=c(1,2),font.axis=2,font.lab=2,cex.axis=1.1,cex.lab=1.1)
 		xx <- 1:n1
 		yy <- period
@@ -110,8 +104,8 @@ WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag)
 		xmax <- (max(GWS,signif_GWS))
 		plot(GWS,yy,type="b",xlim=c(xmin,xmax),xlab="Global Wavelet Spectrum",ylab="Fourier Period (Years)",log="y",ylim=rev(range(yy)))
 		lines(signif_GWS,yy,col="red",lty=2)
-		if (background_noise=="white") {tt <- paste(siglvl*100,"% confidence \nlevel for white-noise\n spectrum",sep="")}
-		if (background_noise=="red") {tt <- paste(siglvl*100,"% confidence \nlevel for red-noise\n spectrum",sep="")}
+		if (noise.type=="white") {tt <- paste(sig*100,"% confidence \nlevel for white-noise\n spectrum",sep="")}
+		if (noise.type=="red") {tt <- paste(sig*100,"% confidence \nlevel for red-noise\n spectrum",sep="")}
 		legend(.2*max(GWS),.65*max(yy),tt,col="red",lty=2,box.lty=0,box.lwd=0,cex=.8)
 		mtext("SIGNIFICANT PERIODS:",line=2)
 		e <- paste(sig_periods[1])
@@ -127,7 +121,7 @@ WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag)
 		}
 	}
 
-	return(list(GWS,signif_GWS,period))
+	return(list(spectrum=GWS,signif=signif_GWS,period=period))
 }
 
 
