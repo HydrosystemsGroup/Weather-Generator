@@ -1,0 +1,124 @@
+---
+title: "Wavelet Decomposition"
+author: "Jeffrey D Walker"
+date: "July 30, 2014"
+output: html_document
+---
+<!--
+%\VignetteEngine{knitr::rmarkdown}
+%\VignetteIndexEntry{Wavelet Decomposition}
+-->
+
+```{r Load data}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+theme_set(theme_bw())
+library(weatherGen)
+data(climate)
+
+# compute daily averages across sites
+clim.da <- group_by(climate, DATE) %>%
+  summarise(N=n(),
+            PRCP=mean(PRCP),
+            TMIN=mean(TMIN),
+            TMAX=mean(TMAX))
+
+print(clim.da)
+
+# aggregate by water year
+clim.wyr <- clim.da %>%
+  mutate(WYEAR=ifelse(month(DATE)>=10, year(DATE)+1, year(DATE))) %>%
+  group_by(WYEAR) %>%
+  summarise(N=n(),
+            PRCP=sum(PRCP),
+            TMIN=mean(TMIN),
+            TMAX=mean(TMAX))
+
+print(head(clim.wyr))
+
+gather(clim.wyr, VAR, VALUE, PRCP:TMAX) %>%
+  ggplot(aes(WYEAR, VALUE)) +
+  geom_line() +
+  facet_wrap(~VAR, scales='free_y', ncol=1)
+
+wavelet_annual_results <- wavelet_annual(x=clim.wyr$PRCP, sig=0.90, noise.type="white", plot.flag=TRUE)
+
+wavelet_annual_results
+# #These arguments coltrol the WARM model
+# #They must be changed only if a WARM model is used
+# NUM_FINAL_PERIODS <- 1
+# NUM_PERIODS_COMP1 <- 8
+# NUM_PERIODS_ALL_COMPS <- c(NUM_PERIODS_COMP1)
+# ALL_SIG_PERIODS <- c(8,9,10,11,12,13,14,15)
+# #Should a WARM model be used, or just a standard ARMA model
+# ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!##
+# USE_WARM_MODEL <- TRUE
+# ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!##
+# AR_MODELS <- list()
+# if (USE_WARM_MODEL) {
+#   Wavelet_Decomposition <- WAVELET_DECOMPOSITION(CLIMATE_VARIABLE,NUM_FINAL_PERIODS,ALL_SIG_PERIODS,NUM_PERIODS_ALL_COMPS,plot_flag=TRUE)
+#   for (k in 1:dim(Wavelet_Decomposition)[2]) {
+# 		AR_MODELS[[k]] <- auto.arima(Wavelet_Decomposition[,k],max.p=2,max.q=2,max.P=0,max.Q=0,stationary=TRUE)
+# 	}
+# } else {
+# 	AR_MODELS[[1]] <- auto.arima(CLIMATE_VARIABLE,max.p=2,max.q=2,max.P=0,max.Q=0,stationary=TRUE)
+# }
+# 
+# ###################################################################################################
+# POWER_SPECTRUM_PRCP_OBS <- Wavelet_Analysis[[1]]
+# POWER_SPECTRUM_PRCP_SIGNIFICANCE <- Wavelet_Analysis[[2]]
+# POWER_SPECTRUM_PRCP_PERIOD <- Wavelet_Analysis[[3]]
+# length_GWS <- length(POWER_SPECTRUM_PRCP_OBS)
+# iter <- 100
+# PRCP_FINAL_ANNUAL_SIM <- array(NA,c(num_year_sim,iter))
+# POWER_SPECTRUM_PRCP_ARIMA_SIM <- array(NA,c(length_GWS,iter))
+# for (y in 1:iter) {
+#   Annual_Sim <- array(NA,c(num_year_sim,length(AR_MODELS)))
+#   for (l in 1:length(AR_MODELS)) {
+#     CUR_MODEL <- AR_MODELS[[l]]
+#     AR <- as.vector(CUR_MODEL$coef)[which(names(CUR_MODEL$coef)!="intercept" & substr(names(CUR_MODEL$coef),1,2)!="ma")]
+#     MA <- as.vector(CUR_MODEL$coef)[which(names(CUR_MODEL$coef)!="intercept" & substr(names(CUR_MODEL$coef),1,2)!="ar")]
+#     INTERCEPT <- 0		#in auto.arima, the "intercept" is actually the mean (see http://www.stat.pitt.edu/stoffer/tsa2/Rissues.htm)
+#     if (length(which(names(CUR_MODEL$coef)=="intercept"))>0) {INTERCEPT <- as.vector(CUR_MODEL$coef)[which(names(CUR_MODEL$coef)=="intercept")]}
+#     Annual_Sim[,l] <- arima.sim(n = num_year_sim, list(ar = AR, ma=MA),sd = sqrt(CUR_MODEL$sigma2[[1]])) + INTERCEPT
+#   }
+#   if (dim(Annual_Sim)[2]>1) {PRCP_FINAL_ANNUAL_SIM[,y] <- (apply(Annual_Sim,FUN=sum,1))} else {PRCP_FINAL_ANNUAL_SIM[,y] <- (Annual_Sim[,1])}
+#   if (transform_data) {
+# 	PRCP_FINAL_ANNUAL_SIM[,y] <- InverseBoxCox(lambdas_ANNUAL_PRCP,PRCP_FINAL_ANNUAL_SIM[,y])
+#   }
+#   CLIMATE_VARIABLE2 <- PRCP_FINAL_ANNUAL_SIM[,y]
+#   Wavelet_Analysis <- WAVELET_ANALYSIS(CLIMATE_VARIABLE2,siglvl=0.90,background_noise="white",plot_flag=FALSE)
+#   POWER_SPECTRUM_PRCP_ARIMA_SIM[,y] <- Wavelet_Analysis[[1]][1:length_GWS]
+# }
+# 
+# POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT <- apply(POWER_SPECTRUM_PRCP_ARIMA_SIM,FUN=mean,c(1))
+# POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT_0.025 <- apply(POWER_SPECTRUM_PRCP_ARIMA_SIM,FUN=quantile,c(1),0.025)
+# POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT_0.975 <- apply(POWER_SPECTRUM_PRCP_ARIMA_SIM,FUN=quantile,c(1),0.975)
+# 
+# 
+# par(mfrow=c(2,2))
+# x1 <- 1
+# x2 <- length_GWS
+# ymin <- min(POWER_SPECTRUM_PRCP_OBS[x1:x2],POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT[x1:x2],POWER_SPECTRUM_PRCP_SIGNIFICANCE[x1:x2],POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT_0.025[x1:x2])
+# ymax <- max(POWER_SPECTRUM_PRCP_OBS[x1:x2],POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT[x1:x2],POWER_SPECTRUM_PRCP_SIGNIFICANCE[x1:x2],POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT_0.975[x1:x2])
+# plot(POWER_SPECTRUM_PRCP_PERIOD[x1:x2],POWER_SPECTRUM_PRCP_OBS[x1:x2],type="l",ylim=c(ymin,ymax),xlab="Period (years)",ylab="",main="",log="y")
+# mtext(side=2,expression(paste("Power (",mm^2,")")),line=2.5)
+# polygon(c(POWER_SPECTRUM_PRCP_PERIOD[x1:x2],rev(POWER_SPECTRUM_PRCP_PERIOD[x1:x2])),c(POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT_0.025[x1:x2],rev(POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT_0.975[x1:x2])),col="grey")
+# lines(POWER_SPECTRUM_PRCP_PERIOD[x1:x2],POWER_SPECTRUM_PRCP_OBS[x1:x2])
+# lines(POWER_SPECTRUM_PRCP_PERIOD[x1:x2],POWER_SPECTRUM_PRCP_ARIMA_SIM_STAT[x1:x2],lty=2,col="blue")
+# lines(POWER_SPECTRUM_PRCP_PERIOD[x1:x2],POWER_SPECTRUM_PRCP_SIGNIFICANCE[x1:x2],col="red",lty=3)
+# 
+# boxplot(apply(PRCP_FINAL_ANNUAL_SIM,FUN=mean,2),main="Mean")
+# points(mean(ANNUAL_PRCP),col="red",pch=19)
+# points(mean(apply(PRCP_FINAL_ANNUAL_SIM,FUN=mean,2)),col="blue",pch=19)
+# boxplot(apply(PRCP_FINAL_ANNUAL_SIM,FUN=sd,2),main="Standard Deviation")
+# points(sd(ANNUAL_PRCP),col="red",pch=19)
+# points(mean(apply(PRCP_FINAL_ANNUAL_SIM,FUN=sd,2)),col="blue",pch=19)
+# boxplot(apply(PRCP_FINAL_ANNUAL_SIM,FUN=skew,2),main="Skew")
+# points(skew(ANNUAL_PRCP),col="red",pch=19)
+# points(mean(apply(PRCP_FINAL_ANNUAL_SIM,FUN=skew,2)),col="blue",pch=19)
+
+```
+
