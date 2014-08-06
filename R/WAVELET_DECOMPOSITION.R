@@ -1,22 +1,20 @@
 #' Wavelet decomposition
 #'
-#' @param CLIMATE_VARIABLE annual timeseries of observed climate variable (e.g. precipitation)
-#' @param NUM_FINAL_PERIODS number of final periods as integer
-#' @param ALL_SIG_PERIODS integer array of significance periods
-#' @param NUM_PERIODS_ALL_COMPS number of comparison periods
+#' @param x annual timeseries of observed climate variable (e.g. precipitation)
+#' @param n.periods number of final periods as integer
+#' @param sig.periods integer array of significance periods
+#' @param n.comp.periods number of comparison periods
 #' @param plot_flag boolean flag to show plots
 #' @export
 #' @examples
-#' WAVELET_DECOMPOSITION(CLIMATE_VARIABLE,NUM_FINAL_PERIODS,ALL_SIG_PERIODS,NUM_PERIODS_ALL_COMPS,plot_flag)
+#' wavelet_decomposition(x=x, n.periods=1, sig.periods=seq(8,15), n.comp.periods=8, plot_flag=TRUE)
 
-WAVELET_DECOMPOSITION <- function(CLIMATE_VARIABLE,NUM_FINAL_PERIODS,ALL_SIG_PERIODS,NUM_PERIODS_ALL_COMPS,plot_flag) {
-
-  if (missing(plot_flag)) {plot_flag <- TRUE}
+wavelet_decomposition <- function(x, n.periods, sig.periods, n.comp.periods, plot_flag=TRUE) {
 
   # wavelet analysis ----
 
   #....construct time series to analyze, pad if necessary
-  CURRENT_CLIMATE_VARIABLE_org <- CLIMATE_VARIABLE
+  CURRENT_CLIMATE_VARIABLE_org <- x
   variance1 <- var(CURRENT_CLIMATE_VARIABLE_org)
   n1 <- length(CURRENT_CLIMATE_VARIABLE_org)
   CURRENT_CLIMATE_VARIABLE <- scale(CURRENT_CLIMATE_VARIABLE_org)
@@ -98,10 +96,10 @@ WAVELET_DECOMPOSITION <- function(CLIMATE_VARIABLE,NUM_FINAL_PERIODS,ALL_SIG_PER
     signif_GWS[a1] <- fft_theor[a1]*variance1*chisquare_GWS[a1]
   }
 
-  LOW_FREQUENCY_COMPONENTS <- array(0,c(length(CLIMATE_VARIABLE),NUM_FINAL_PERIODS))
-  for (i in 1:NUM_FINAL_PERIODS) {
-    CUR_PERIODS <- ALL_SIG_PERIODS[1:NUM_PERIODS_ALL_COMPS[i]]
-    if (i>1) {CUR_PERIODS <- ALL_SIG_PERIODS[(1 + (i-1)*NUM_PERIODS_ALL_COMPS[i-1]):(NUM_PERIODS_ALL_COMPS[i] + (i-1)*NUM_PERIODS_ALL_COMPS[i-1])]}
+  LOW_FREQUENCY_COMPONENTS <- array(0,c(length(x),n.periods))
+  for (i in 1:n.periods) {
+    CUR_PERIODS <- sig.periods[1:n.comp.periods[i]]
+    if (i>1) {CUR_PERIODS <- sig.periods[(1 + (i-1)*n.comp.periods[i-1]):(n.comp.periods[i] + (i-1)*n.comp.periods[i-1])]}
     sj <- scale[CUR_PERIODS]
     #for Morlet Wavelet with freq = 6
     Cdelta <- .776
@@ -113,9 +111,9 @@ WAVELET_DECOMPOSITION <- function(CLIMATE_VARIABLE,NUM_FINAL_PERIODS,ALL_SIG_PER
   NOISE <- CURRENT_CLIMATE_VARIABLE_org - apply(LOW_FREQUENCY_COMPONENTS,FUN=sum,c(1))
 
   if (plot_flag) {
-    par(mfrow=c((2+NUM_FINAL_PERIODS),1),font.axis=2,font.lab=2)
-    plot(CLIMATE_VARIABLE,type="l",main="ORIGINAL DATA",xlab="TIME (YEARS)",ylab="")
-    for (k in 1:NUM_FINAL_PERIODS){
+    par(mfrow=c((2+n.periods),1),font.axis=2,font.lab=2)
+    plot(x,type="l",main="ORIGINAL DATA",xlab="TIME (YEARS)",ylab="")
+    for (k in 1:n.periods){
       plot(LOW_FREQUENCY_COMPONENTS[,1],type="l",main=paste("COMPONENT",k),xlab="TIME (YEARS)",ylab="")
     }
     plot(NOISE,type="l",main="NOISE",xlab="TIME (YEARS)",ylab="")
