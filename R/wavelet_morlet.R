@@ -30,5 +30,8 @@ wavelet_morlet <- function(k,s) {
   fourier_factor <- (4*pi)/(k0 + sqrt(2 + k0^2)) # Scale-->Fourier [Sec.3h]
   coi <- fourier_factor/sqrt(2)                  # Cone-of-influence [Sec.3g]
   dofmin <- 2  	# Degrees of freedom
-  return(daughter)
+  return(list(daughter=daughter,
+              fourier_factor=fourier_factor,
+              coi=coi,
+              dofmin=dofmin))
 }
