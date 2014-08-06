@@ -10,20 +10,19 @@
 
 wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
   #....construct time series to analyze, pad if necessary
-	CURRENT_CLIMATE_VARIABLE_org <- x
-	variance1 <- var(CURRENT_CLIMATE_VARIABLE_org)
-	n1 <- length(CURRENT_CLIMATE_VARIABLE_org)
-	CURRENT_CLIMATE_VARIABLE <- scale(CURRENT_CLIMATE_VARIABLE_org)
-	variance2 <- var(CURRENT_CLIMATE_VARIABLE)
-	base2 <- floor(log(n1)/log(2) + 0.4999)   # power of 2 nearest to N
-	CURRENT_CLIMATE_VARIABLE <- c(CURRENT_CLIMATE_VARIABLE,rep(0,(2^(base2+1)-n1)))
-	n <- length(CURRENT_CLIMATE_VARIABLE)
+	x.var <- var(x)
+	x.n <- length(x)
+	z <- scale(x)
+	z.var <- var(z)
+	base2 <- floor(log(x.n)/log(2) + 0.4999)   # power of 2 nearest to N
+	z <- c(z,rep(0,(2^(base2+1)-x.n)))
+	n <- length(z)
 
 	#Determine parameters for Wavelet analysis
 	dt <- 1
 	dj <- 0.25
 	s0 <- 2*dt
-	J <- floor((1/dj)*log((n1*dt/s0),base=2))
+	J <- floor((1/dj)*log((x.n*dt/s0),base=2))
 
 	#....construct SCALE array & empty PERIOD & WAVE arrays
 	scale <- s0*2^((0:J)*dj)
@@ -35,23 +34,23 @@ wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
 	k <- k*((2.*pi)/(n*dt))
 	k <- c(0,k,-rev(k[1:floor((n-1)/2)]))
 
-	f <- fft(CURRENT_CLIMATE_VARIABLE,inverse=FALSE)        #fourier transform of standardized precipitation
+	f <- fft(z, inverse=FALSE)        #fourier transform of standardized precipitation
 
 	# loop through all scales and compute transform
 	for (a1 in 1:(J+1)) {
-		daughter <- waveletf(k,scale[a1])
-		results <- waveletf2(k,scale[a1])
-		fourier_factor <- results[1]
-		coi <- results[2]
-		dofmin <- results[3]
-		wave[a1,] <- fft(f*daughter,inverse=TRUE)/n  # wavelet transform[Eqn(4)]
+		wav <- wavelet_morlet(k,scale[a1])
+    daughter <- wav[['daughter']]
+		fourier_factor <- wav[['fourier_factor']]
+		coi <- wav[['coi']]
+		dofmin <- wav[['dofmin']]
+		wave[a1,] <- fft(f*daughter, inverse=TRUE)/n  # wavelet transform[Eqn(4)]
 	}
 
 	period <- fourier_factor*scale
-	coi <- coi*dt*c((0.00001),1:((n1+1)/2-1),rev((1:(n1/2-1))),(0.00001))  # COI [Sec.3g]
-	wave <- wave[,1:n1]  # get rid of padding before returning
+	coi <- coi*dt*c((0.00001),1:((x.n+1)/2-1),rev((1:(x.n/2-1))),(0.00001))  # COI [Sec.3g]
+	wave <- wave[,1:x.n]  # get rid of padding before returning
 	POWER <- abs(wave)^2
-	GWS <- variance1*apply(POWER,FUN=mean,c(1)) #Global Wavelet Spectrum
+	GWS <- x.var*apply(POWER, FUN=mean, 1) #Global Wavelet Spectrum
 
   # significance testing ----
   # get the appropriate parameters [see Table(2)]
@@ -72,11 +71,11 @@ wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
 	#ENTIRE POWER SPECTRUM
 	chisquare <- qchisq(sig, dof)/dof
 	signif <- fft_theor*chisquare   # [Eqn(18)]
-	sig95 <- ((signif))%o%(array(1,n1))  # expand signif --> (J+1)x(N) array
+	sig95 <- ((signif))%o%(array(1,x.n))  # expand signif --> (J+1)x(N) array
 	sig95 <- POWER / sig95         # where ratio > 1, power is significant
 
 	#TIME_AVERAGED (GLOBAL WAVELET SPECTRUM)
-	dof <- n1 - scale
+	dof <- x.n - scale
 	if (length(dof) == 1) {dof <- array(0,(J+1))+dof}
 	dof[which(dof < 1)] <- 1
 	dof <- dofmin*sqrt(1 + (dof*dt/gamma_fac / scale)^2 )
@@ -86,7 +85,7 @@ wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
 	signif_GWS <- array(NA,(J+1))
 	for (a1 in 1:(J+1)) {
 		chisquare_GWS[a1] <- qchisq(sig,dof[a1])/dof[a1]
-		signif_GWS[a1] <- fft_theor[a1]*variance1*chisquare_GWS[a1]
+		signif_GWS[a1] <- fft_theor[a1]*x.var*chisquare_GWS[a1]
 	}
 
   # plotting ----
@@ -94,7 +93,7 @@ wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
 	sig_periods <- which(GWS>signif_GWS & period > period_lower_limit)
 	if (plot.flag) {
 		par(mfrow=c(1,2),font.axis=2,font.lab=2,cex.axis=1.1,cex.lab=1.1)
-		xx <- 1:n1
+		xx <- 1:x.n
 		yy <- period
 		image(x=xx,y=yy,z=t(log(POWER,base=2)),xlab="Time (Years)",ylab="Fourier Period (Years)",ylim=rev(range(yy)),log="y",col=(heat.colors(12)))
 		lines(xx,coi,lty=2)

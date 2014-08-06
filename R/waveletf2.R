@@ -3,6 +3,8 @@
 #' @param k wavelet number array
 #' @param s scale parameter
 #' @export
+#' @references
+#' http://paos.colorado.edu/research/wavelets/software.html
 #' @examples
 #' waveletf2(k,s)
 

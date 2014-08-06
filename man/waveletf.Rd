@@ -16,4 +16,7 @@ Wavelet function that returns transform
 \examples{
 waveletf(k,s)
 }
+\references{
+http://paos.colorado.edu/research/wavelets/software.html
+}
 

@@ -16,4 +16,7 @@ Wavelet function that returns fourier_factor, cone of influence and degrees of f
 \examples{
 waveletf2(k,s)
 }
+\references{
+http://paos.colorado.edu/research/wavelets/software.html
+}
 

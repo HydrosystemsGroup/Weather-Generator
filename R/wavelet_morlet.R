@@ -1,14 +1,24 @@
-#' Wavelet function that returns transform
+#' Apply Morlet wavelet function to Fourier frequencies
 #'
-#' @param k wavelet number array
-#' @param s scale parameter
+#' @param k numeric array of Fourier frequencies at which to compute wavelet
+#' @param s wavelet scale parameter
 #' @export
+#' @return
+#' List containing
+#'
+#' \itemize{
+#'   \item \code{daughter}: a numeric vector of the wavelet function
+#'   \item \code{fourier_factor}: ratio of Fourier period to scale
+#'   \item \code{coi}: cone of influence
+#'   \item \code{dofmin}: degrees of freedom for each point in wavelet power
+#' }
+#'
 #' @references
 #' http://paos.colorado.edu/research/wavelets/software.html
 #' @examples
 #' waveletf(k,s)
 
-waveletf <- function(k,s) {
+wavelet_morlet <- function(k,s) {
   nn <- length(k)
   k0 <- 6    #nondimensional frequency, here taken to be 6 to satisfy the admissibility condition [Farge 1992]
   z <- array(1,nn)
