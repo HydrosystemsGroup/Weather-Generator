@@ -16,3 +16,20 @@ library(devtools)
 install_github('walkerjeffd/r-weathergen')
 library(weatherGen)
 ```
+
+## Building
+
+To build from source, run:
+
+```R
+library(devtools)
+document() 
+build()
+```
+
+To build only vignettes, run:
+
+```R
+library(devtools)
+build_vignettes()
+```
