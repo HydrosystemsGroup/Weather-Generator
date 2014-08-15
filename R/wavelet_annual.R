@@ -103,9 +103,9 @@ wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
 		xmax <- (max(GWS,signif_GWS))
 		plot(GWS,yy,type="b",xlim=c(xmin,xmax),xlab="Global Wavelet Spectrum",ylab="Fourier Period (Years)",log="y",ylim=rev(range(yy)))
 		lines(signif_GWS,yy,col="red",lty=2)
-		if (noise.type=="white") {tt <- paste(sig*100,"% confidence \nlevel for white-noise\n spectrum",sep="")}
-		if (noise.type=="red") {tt <- paste(sig*100,"% confidence \nlevel for red-noise\n spectrum",sep="")}
-		legend(.2*max(GWS),.65*max(yy),tt,col="red",lty=2,box.lty=0,box.lwd=0,cex=.8)
+# 		if (noise.type=="white") {tt <- paste(sig*100,"% confidence \nlevel for white-noise\n spectrum",sep="")}
+# 		if (noise.type=="red") {tt <- paste(sig*100,"% confidence \nlevel for red-noise\n spectrum",sep="")}
+# 		legend(.2*max(GWS),.65*max(yy),tt,col="red",lty=2,box.lty=0,box.lwd=0,cex=.8)
 		mtext("SIGNIFICANT PERIODS:",line=2)
 		e <- paste(sig_periods[1])
 		if (length(sig_periods)==0) {
@@ -118,6 +118,7 @@ wavelet_annual <- function(x, sig=0.90, noise.type="white", plot.flag=TRUE) {
 			}
 			mtext(e,line=1)
 		}
+		par(mfrow=c(1,1))
 	}
 
 	return(list(spectrum=GWS,signif=signif_GWS,period=period))
