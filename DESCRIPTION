@@ -10,6 +10,11 @@ Description: Use this package to generate synthetic time series of
     precipitation and air temperature based on observed datasets.
 License: MIT
 VignetteBuilder: knitr
+Depends:
+    R (>= 3.1.0)
+Imports:
+    biwavelet,
+    dplyr (>= 0.2)
 Suggests:
     knitr,
     rmarkdown

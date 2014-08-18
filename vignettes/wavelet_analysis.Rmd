@@ -1,7 +1,7 @@
 ---
 title: "Wavelet Analysis"
 author: "Jeffrey D Walker, PhD"
-date: "August 15, 2014"
+date: "August 18, 2014"
 output:
   html_document:
     toc: yes
@@ -11,7 +11,7 @@ output:
 %\VignetteIndexEntry{Wavelet Analysis}
 -->
 
-This document describes the wavelet analysis of an annual precipitation timeseries. Two identical analyses are performed using 1) Scott Steinshneider's code and 2) the `biwavelet` package.
+This document describes how to perform a wavelet analysis of an annual precipitation timeseries. Three identical analyses are performed using 1) Scott Steinshneider's code, and 2) the `biwavelet` package, and 3) the `weatherGen` package.
 
 ## Load Data
 
@@ -53,49 +53,209 @@ ggplot(clim.wyr, aes(WYEAR, PRCP)) +
 
 The goal of the wavelet analysis is to identify any significant low-frequency signals in the annual precipitation timeseries.
 
-### Scott's Code
+### Scott's Scripts
 
-This section uses the code written by Scott Steinschneider. The names of the function and arguments have been modified, but the algorithm has not been changed.
+This section uses the code written by Scott Steinschneider. 
 
-The wavelet decomposition is performed using the `wavelet_annual()` function (formerly `WAVELET_ANALYSIS`). This function accepts a numeric array of the time series, a significance level, a type of background noise (white or red), and a flag for generating a plot of the result.
+```{r scott code, echo=FALSE}
+WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag) {
+	if (missing(plot_flag)) {plot_flag <- TRUE}
+	if (missing(siglvl)) {siglvl <- 0.90}
+	if (missing(background_noise)) {background_noise <- "white"}
+	
+	#Define Wavelet function used that returns transform
+	waveletf <- function(k,s) {
+		nn <- length(k)
+		k0 <- 6    #nondimensional frequency, here taken to be 6 to satisfy the admissibility condition [Farge 1992]
+		z <- array(1,nn)
+		z[which(k<=0)] <- 0
+		expnt <- -((s*k - k0)^2/2)*z
+		norm <- sqrt(s*k[2])*(pi^(-0.25))*sqrt(nn)    # total energy=N   [Eqn(7)]
+		daughter <- norm*exp(expnt)
+		daughter <- daughter*z
+		fourier_factor <- (4*pi)/(k0 + sqrt(2 + k0^2)) # Scale-->Fourier [Sec.3h]
+		coi <- fourier_factor/sqrt(2)                  # Cone-of-influence [Sec.3g]
+		dofmin <- 2  	# Degrees of freedom	
+		return(daughter)
+	}
 
-```{r annual wavelet}
-wavelet_analysis <- wavelet_annual(x=clim.wyr$PRCP, sig=0.90, noise.type="white", plot.flag=TRUE)
+	#Define Wavelet function used that returns fourier_factor, cone of influence, and degrees of freedom
+	waveletf2 <- function(k,s) {
+		nn <- length(k)
+		k0 <- 6    #nondimensional frequency, here taken to be 6 to satisfy the admissibility condition [Farge 1992]
+		z <- array(1,nn)
+		z[which(k<=0)] <- 0
+		expnt <- -((s*k - k0)^2/2)*z
+		norm <- sqrt(s*k[2])*(pi^(-0.25))*sqrt(nn)    # total energy=N   [Eqn(7)]
+		daughter <- norm*exp(expnt)
+		daughter <- daughter*z
+		fourier_factor <- (4*pi)/(k0 + sqrt(2 + k0^2)) # Scale-->Fourier [Sec.3h]
+		coi <- fourier_factor/sqrt(2)                  # Cone-of-influence [Sec.3g]
+		dofmin <- 2  	# Degrees of freedom	
+		return(c(fourier_factor,coi,dofmin))
+	}
+
+	# Perform Wavelet
+	#....construct time series to analyze, pad if necessary
+	CURRENT_CLIMATE_VARIABLE_org <- CLIMATE_VARIABLE
+	variance1 <- var(CURRENT_CLIMATE_VARIABLE_org)
+	n1 <- length(CURRENT_CLIMATE_VARIABLE_org)
+	CURRENT_CLIMATE_VARIABLE <- scale(CURRENT_CLIMATE_VARIABLE_org)
+	variance2 <- var(CURRENT_CLIMATE_VARIABLE)
+	base2 <- floor(log(n1)/log(2) + 0.4999)   # power of 2 nearest to N
+	CURRENT_CLIMATE_VARIABLE <- c(CURRENT_CLIMATE_VARIABLE,rep(0,(2^(base2+1)-n1)))
+	n <- length(CURRENT_CLIMATE_VARIABLE)
+
+	#Determine parameters for Wavelet analysis
+	dt <- 1
+	dj <- 0.25
+	s0 <- 2*dt
+	J <- floor((1/dj)*log((n1*dt/s0),base=2))
+
+	#....construct SCALE array & empty PERIOD & WAVE arrays
+	scale <- s0*2^((0:J)*dj)
+	period <- scale
+	wave <- array(as.complex(0),c(J+1,n))  # define the wavelet array
+
+	#....construct wavenumber array used in transform [Eqn(5)]
+	k <- c(1:floor(n/2))
+	k <- k*((2.*pi)/(n*dt))
+	k <- c(0,k,-rev(k[1:floor((n-1)/2)]))
+
+	f <- fft(CURRENT_CLIMATE_VARIABLE,inverse=FALSE)        #fourier transform of standardized precipitation
+
+	# loop through all scales and compute transform
+	for (a1 in 1:(J+1)) {
+		daughter <- waveletf(k,scale[a1])
+		results <- waveletf2(k,scale[a1])
+		fourier_factor <- results[1]
+		coi <- results[2]
+		dofmin <- results[3]
+		wave[a1,] <- fft(f*daughter,inverse=TRUE)/n  # wavelet transform[Eqn(4)]
+	}
+
+	period <- fourier_factor*scale
+	coi <- coi*dt*c((0.00001),1:((n1+1)/2-1),rev((1:(n1/2-1))),(0.00001))  # COI [Sec.3g]
+	wave <- wave[,1:n1]  # get rid of padding before returning
+	POWER <- abs(wave)^2
+	GWS <- variance1*apply(POWER,FUN=mean,c(1)) #Global Wavelet Spectrum
+
+	# Significance Testing
+	# get the appropriate parameters [see Table(2)]
+	k0 <- 6
+	empir <- c(2,0.776,2.32,0.60)
+	dofmin <- empir[1]     # Degrees of freedom with no smoothing
+	Cdelta <- empir[2]     # reconstruction factor
+	gamma_fac <- empir[3]  # time-decorrelation factor
+	dj0 <- empir[4]       # scale-decorrelation factor
+	if (background_noise=="white") {lag1 <- 0}    #for red noise background, lag1 autocorrelation = 0.72, for white noise background, lag1 autocorrelation = 0
+	if (background_noise=="red") {lag1 <- .72}
+
+	freq <- dt / period   # normalized frequency
+	fft_theor <- (1-lag1^2) / (1-2*lag1*cos(freq*2*pi)+lag1^2)  # [Eqn(16)]			
+	fft_theor <- fft_theor  # include time-series variance
+	dof <- dofmin
+
+	#ENTIRE POWER SPECTRUM
+	chisquare <- qchisq(siglvl,dof)/dof
+	signif <- fft_theor*chisquare   # [Eqn(18)]
+	sig95 <- ((signif))%o%(array(1,n1))  # expand signif --> (J+1)x(N) array
+	sig95 <- POWER / sig95         # where ratio > 1, power is significant
+
+	#TIME_AVERAGED (GLOBAL WAVELET SPECTRUM)
+	dof <- n1 - scale
+	if (length(dof) == 1) {dof <- array(0,(J+1))+dof}
+	dof[which(dof < 1)] <- 1
+	dof <- dofmin*sqrt(1 + (dof*dt/gamma_fac / scale)^2 )   
+	tt <- which(dof < dofmin)
+	dof[tt] <- dofmin
+	chisquare_GWS <- array(NA,(J+1))
+	signif_GWS <- array(NA,(J+1))
+	for (a1 in 1:(J+1)) {
+		chisquare_GWS[a1] <- qchisq(siglvl,dof[a1])/dof[a1]
+		signif_GWS[a1] <- fft_theor[a1]*variance1*chisquare_GWS[a1]
+	}
+  
+  # PLOT
+	period_lower_limit <- 0
+	sig_periods <- which(GWS>signif_GWS & period > period_lower_limit)
+	if (plot_flag) {
+		par(mfrow=c(1,2),font.axis=2,font.lab=2,cex.axis=1.1,cex.lab=1.1)
+		xx <- 1:n1
+		yy <- period
+		image(x=xx,y=yy,z=t(log(POWER,base=2)),xlab="Time (Years)",ylab="Fourier Period (Years)",ylim=rev(range(yy)),log="y",col=(heat.colors(12)))
+		lines(xx,coi,lty=2)
+		contour(x=xx,y=yy,z=t(sig95),add=TRUE,levels=c(-99,1),labels="")
+
+		xmin <- (min(GWS,signif_GWS))
+		xmax <- (max(GWS,signif_GWS))
+		plot(GWS,yy,type="b",xlim=c(xmin,xmax),xlab="Global Wavelet Spectrum",ylab="Fourier Period (Years)",log="y",ylim=rev(range(yy)))
+		lines(signif_GWS,yy,col="red",lty=2)
+		if (background_noise=="white") {tt <- paste(siglvl*100,"% confidence \nlevel for white-noise\n spectrum",sep="")}    
+		if (background_noise=="red") {tt <- paste(siglvl*100,"% confidence \nlevel for red-noise\n spectrum",sep="")}
+		legend(.2*max(GWS),.65*max(yy),tt,col="red",lty=2,box.lty=0,box.lwd=0,cex=.8)
+		mtext("SIGNIFICANT PERIODS:",line=2)
+		e <- paste(sig_periods[1])
+		if (length(sig_periods)==0) {
+			mtext("NONE!",line=1)
+		} else if (length(sig_periods)==1) {
+			mtext(e,line=1)
+		} else {
+			for (h in 2:length(sig_periods)) {
+				e <- paste(e,",",paste(sig_periods[h]),sep="")
+			}
+			mtext(e,line=1)
+		}
+	}
+	
+	return(list(GWS,signif_GWS,period))
+}
 ```
 
-The plots show a heat map of the localized power (W(s,t)) and the time-averaged global wavelet spectrum (GWS) as a function of Fourier period. The --o--o-- line shows `$period` vs. `$spectrum`, and the red ----- line shows `$period` vs. `$signif`. The "Significant Periods" are those where `$spectrum > $signif`.
+The wavelet analysis and significance test are performed using the `WAVELET_ANALYSIS()` function. This function accepts a numeric array of the annual precipitation time series, a significance level, a type of background noise (white or red), and a flag for generating a plot of the result. It returns the global wave spectrum (GWS), significance levels, and associated period. The periods with powers greater than the corresponding significance levels are significant.
 
-```{r annual wavelet results}
-wavelet_analysis
+```{r scott}
+wave.scott <- WAVELET_ANALYSIS(CLIMATE_VARIABLE=clim.wyr$PRCP, siglvl=0.90,
+                               background_noise="white", plot_flag=TRUE)
 ```
 
-If we lower the significance level from 0.9 to 0.8 then the red line of significance shifts towards the y-axis. 
+The plots show 1) a heat map of the localized power (W(s,t)) and 2) the time-averaged global wavelet spectrum (GWS) as a function of Fourier period. The --o--o-- line shows fourier period vs. GWS power, and the red ----- line shows period vs. significance power. The "Significant Periods" are those where the GWS power > significance power.
+
+The output of this function is an unnamed list of three vectors corresponding to the 1) GWS power, 2) significance levels, and 3) fourier periods:
+
+```{r scott result}
+wave.scott
+```
+
+If the significance level is lowered from 0.9 to 0.8 then the red line of significance shifts towards the y-axis. 
 
 ```{r annual wavelet with sig of 0.8}
-wavelet_analysis2 <- wavelet_annual(x=clim.wyr$PRCP, sig=0.80, 
-                                    noise.type="white", plot.flag=TRUE)
+WAVELET_ANALYSIS(CLIMATE_VARIABLE=clim.wyr$PRCP, siglvl=0.80,
+                 background_noise="white", plot_flag=TRUE)
 ```
 
 ### biwavelet Package
 
-The `biwavelet` package contains two functions (`biwavelet::wt()` and `biwavelet::wt.sig()`) that provide identical functionality as the `wavelet_annual` function. It turns out that this package is a translation of the [original matlab code](http://paos.colorado.edu/research/wavelets/software.html) accompanying Torrence and Compo (1998). This same matlab code was essentially used by Scott to create his own R version of the package.
+The `biwavelet` package contains two functions (`biwavelet::wt()` and `biwavelet::wt.sig()`) that provide identical functionality as Scott's `WAVELET_ANALYSIS` function. The `biwavelet` package is a translation of the [original matlab code](http://paos.colorado.edu/research/wavelets/software.html) accompanying Torrence and Compo (1998). This same matlab code was used by Scott to create his own R version of the package. Therefore, both Scott's code and the `biwavelet` package code are essentially identical.
 
-Here is the same analysis for significance level of 0.90 and white background noise. 
+Here is the same analysis for significance level of 0.90 and white background noise using the `biwavelet` package. 
 ```{r bw}
 library(biwavelet)
 
-bw <- biwavelet::wt(d=cbind(1:nrow(clim.wyr), clim.wyr$PRCP), dt=1, dj=1/4, 
-                    max.scale=nrow(clim.wyr), sig.level=0.90, lag1=0, sig.test=1)
+bw <- biwavelet::wt(d=cbind(1:length(clim.wyr$PRCP), clim.wyr$PRCP), 
+                    dt=1, dj=1/4, max.scale=length(clim.wyr$PRCP), 
+                    sig.level=0.90, lag1=0, sig.test=1)
 str(bw)
 ```
 
 This function returns an object of class `biwavelet` that includes a generic plotting function.
 
 ```{r plot_bw}
+par(mfrow=c(1,1))
 plot(bw)
 ```
 
-The time-averaged global wave spectrum (GWS) can be computed as the row-wise mean the `$power` matrix.
+The time-averaged global wave spectrum (GWS) is then computed as the row-wise mean the `$power` matrix.
 
 ```{r bw gws}
 bw$gws <- apply(bw$power, 1, mean)
@@ -105,21 +265,21 @@ The significance test of the GWS can be computed using the `biwavelet::wt.sig()`
 
 ```{r bw gws sig}
 bw$gws.sig <- wt.sig(d=clim.wyr$PRCP, dt=bw$dt, scale=bw$scale, sig.test=1, 
-                     sig.level=0.90, dof=nrow(clim.wyr)-bw$scale, 
+                     sig.level=0.90, dof=length(clim.wyr$PRCP)-bw$scale, 
                      mother='morlet', lag1=0.0)
 ```
 
-The following tables show identical values for the period, global spectrum power, and significance between the `wavelet_annual()` and `biwavelet::wt()`output.
+The following tables show identical values for the period, global spectrum power, and significance between Scott's `WAVELET_ANNUAL()` and the `biwavelet::wt()` function output.
 
 ```{r wavelet bw compare}
 # compare periods
-cbind(biwavelet=bw$period, weatherGen=wavelet_analysis$period)
+cbind(biwavelet=bw$period, scott=wave.scott[[3]])
 
 # compare global spectrum (row-wise mean of power for biwavelet::wt())
-cbind(biwavelet=bw$gws, weatherGen=wavelet_analysis$spectrum)
+cbind(biwavelet=bw$gws, scott=wave.scott[[1]])
 
 # compare signif
-cbind(biwavelet=bw$gws.sig$signif, weatherGen=wavelet_analysis$signif)
+cbind(biwavelet=bw$gws.sig$signif, scott=wave.scott[[2]])
 ```
 
 We can also plot the output of `biwavelet::wt()`
@@ -133,13 +293,35 @@ plot(bw$gws, bw$period, type="b",
 lines(bw$gws.sig$signif, bw$period, lty=2, col='red')  	
 ```
 
-Which is identical to the `wavelet_analysis()` plot.
+Which is effectively identical to the `WAVELET_ANALYSIS()` output plot.
 
 ```{r wavelet analysis plot}
-wavelet_analysis <- wavelet_annual(x=clim.wyr$PRCP, sig=0.90, noise.type='white', plot.flag=TRUE)
+WAVELET_ANALYSIS(CLIMATE_VARIABLE=clim.wyr$PRCP, siglvl=0.90,
+                 background_noise="white", plot_flag=TRUE)
 ```
 
-# Session Info
+### weatherGen Package
+
+The `weatherGen` package provides a `wavelet_analysis()` function that uses the biwavelet `wt()` and `wt.sig()` functions to provide similar functionality as Scott's `WAVELET_ANALYSIS()` function, but with fewer lines of code. 
+
+```{r wgen}
+wave.wgen <- wavelet_analysis(x=clim.wyr$PRCP, sig.level=0.90, noise.type="white")
+str(wave.wgen)
+```
+
+And we can plot this same as with the `biwavelet` output as before.
+
+```{r plot wgen}
+par(mfrow=c(1,2))
+plot(wave.wgen, plot.cb=TRUE, plot.phase=FALSE)
+plot(wave.wgen$gws, wave.wgen$period, type="b",
+     xlab="Global Wavelet Spectrum", ylab="Fourier Period (Years)",
+     log="y", ylim=rev(range(wave.wgen$period)), 
+     xlim=range(c(wave.wgen$gws, wave.wgen$gws.sig$signif)))
+lines(wave.wgen$gws.sig$signif, wave.wgen$period, lty=2, col='red')    
+```
+
+## Session Info
 
 ```{r session}
 sessionInfo()
