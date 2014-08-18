@@ -14,6 +14,8 @@ output:
 ## Load Data
 
 ```{r load data, warning=FALSE, message=FALSE}
+library(knitr)
+knitr::opts_chunk$set(eval=FALSE)
 library(dplyr)
 library(tidyr)
 library(lubridate)
