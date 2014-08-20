@@ -14,7 +14,9 @@ Depends:
     R (>= 3.1.0)
 Imports:
     biwavelet,
-    dplyr (>= 0.2)
+    dplyr (>= 0.2),
+    hydromad,
+    forecast
 Suggests:
     knitr,
     rmarkdown
