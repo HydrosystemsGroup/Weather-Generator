@@ -371,6 +371,8 @@ wave.comp <- WAVELET_DECOMPOSITION(CLIMATE_VARIABLE=clim.wyr$PRCP,
 head(wave.comp)
 ```
 
+## Create ARIMA Models
+
 We can then create ARMA models of each wavelet and noise component.
 
 ```{r warm arima models}
@@ -407,7 +409,7 @@ Note that this model is a zero order AR and zero order MA, and therefore is simp
 plot(forecast(ar_models.arima[["PRECIP"]], h=nrow(clim.wyr)))
 ```
 
-## ARMA Forecasts
+## ARIMA Model Simulations
 
 Using the ARMA models of the noise and wavelet components, we can generate forecasts of annual precipitation using the `arima.sim()` function. This function is wrapped in a new function called `simulate.arima()` that simulates a single ARMA model.
 
@@ -443,7 +445,7 @@ simulate.arimas <- function(models, n, components=TRUE) {
   # components: if TRUE returns list of $sum and $components, otherwise returns just sum vector
   
   # run simulation on each model and combine into 2-d array
-  sim.components <- lapply(models, simulate.arima, n=40) %>% sapply(cbind)
+  sim.components <- lapply(models, simulate.arima, n=n) %>% sapply(cbind)
   
   # compute sum of individual component simulations
   if (ncol(sim.components) > 1) {
@@ -518,7 +520,6 @@ lines(sim.warm.prcp.stat[, 'MEAN'], col='red')
 This figure shows each individual simulated timeseries (the red line is the overall mean).
 
 ```{r plot_sim_precip_ggplot}
-library(tidyr)
 as.data.frame(sim.warm.prcp) %>% 
   mutate(YEAR=seq(1:nrow(sim.warm.prcp))) %>%
   gather(TRIAL, VALUE, -YEAR) %>% 
@@ -528,7 +529,7 @@ as.data.frame(sim.warm.prcp) %>%
   labs(x='Year', y="Simulated Annual Precip (mm/yr)")
 ```
 
-This figure summarises the spectrum power for each period, and compares the mean, standard deviation and skey of the simulated (blue) and observed (red) annual timeseries.
+This figure summarises the spectrum power for each period, and compares the mean, standard deviation and skew of the simulated (blue) and observed (red) annual timeseries.
 
 ```{r plot_sim_gws, fig.height=8}
 par(mfrow=c(2,2))
@@ -577,382 +578,7 @@ The ARMA models of the noise and wavelet components can be adjusted by changing 
 1. lag1 coefficients of the AR model ($\alpha_h$) to adjust the persistence of the low-frequency signals
 2. standard deviation of the noise component ($\sigma_e$) to adjust the magnitude of the low-frequency signals 
 
-```{r scott sce, echo=FALSE}
-# source: http://ihacres.googlecode.com/svn-history/r89/trunk/R/sce.R
-sceDefaults <- function()
-    list(ncomplex = 5, ## number of complexes
-         cce.iter = NA, ## number of iteration in inner loop (CCE algorithm)
-         fnscale = 1, ## function scaling factor (set to -1 for maximisation)
-         elitism = 1, ## controls amount of weighting in sampling towards the better parameter sets
-         initsample = "latin", ## sampling scheme for initial values -- "latin" or "random"
-         reltol = 1e-5, ## convergence threshold: relative improvement factor required in an SCE iteration
-         tolsteps = 7, ## number of iterations within reltol to confirm convergence
-         maxit = 10000, ## maximum number of iterations
-         maxeval = Inf, ## maximum number of function evaluations
-         maxtime = Inf, ## maximum duration of optimization in seconds
-         returnpop = FALSE, ## whether to return populations from all iterations
-         trace = 0, ## level of user feedback
-         REPORT = 1) ## number of iterations between reports when trace >= 1
-
-
-SCEoptim <- function(FUN, par, ..., lower = -Inf, upper = Inf, control = list()) {
-    FUN <- match.fun(FUN)
-    stopifnot(is.numeric(par))
-    stopifnot(length(par) > 0)
-    stopifnot(is.numeric(lower))
-    stopifnot(is.numeric(upper))
-    ## allow `lower` or `upper` to apply to all parameters
-    if (length(lower) == 1)
-        lower <- rep(lower, length = length(par))
-    if (length(upper) == 1)
-        upper <- rep(upper, length = length(par))
-    stopifnot(length(lower) == length(par))
-    stopifnot(length(upper) == length(par))
-
-    ## determine number of variables to be optimized
-    NDIM <- length(par)
-
-    ## update default options with supplied options
-    stopifnot(is.list(control))
-    control <- modifyList(sceDefaults(), control)
-    isValid <- names(control) %in% names(sceDefaults())
-    if (any(!isValid))
-        stop("unrecognised options: ",
-             toString(names(control)[!isValid]))
-
-    returnpop <- control$returnpop
-    trace <- control$trace
-    nCOMPLEXES <- control$ncomplex
-    CCEITER <- control$cce.iter
-    MAXIT <- control$maxit
-    MAXEVAL <- control$maxeval
-
-    ## recommended number of CCE steps in Duan et al 1994:
-    if (is.na(CCEITER))
-        CCEITER <- 2 * NDIM + 1
-
-    if (is.finite(MAXEVAL)) {
-        ## upper bound on number of iterations to reach MAXEVAL
-        MAXIT <- min(MAXIT, ceiling(MAXEVAL / (nCOMPLEXES * CCEITER)))
-    }
-
-    ## define number of points in each complex
-    nPOINTS_COMPLEX <- 2 * NDIM + 1
-
-    ## define number of points in each simplex
-    nPOINTS_SIMPLEX <- NDIM+1
-
-    ## define total number of points
-    nPOINTS <- nCOMPLEXES * nPOINTS_COMPLEX
-
-    ## initialize counters
-    funevals <- 0
-
-
-    costFunction <- function(FUN, par, ...)
-    {
-        ## check lower and upper bounds
-        i <- which(par < lower)
-        if (any(i)) {
-            i <- i[1]
-            return( 1e12 + (lower[i] - par[i]) * 1e6 )
-        }
-        i <- which(par > upper)
-        if (any(i)) {
-            i <- i[1]
-            return( 1e12 + (par[i] - upper[i]) * 1e6 )
-        }
-        funevals <<- funevals + 1
-        result <- FUN(par, ...) * control$fnscale
-        if (is.na(result))
-            result <- 1e12
-        result
-    }
-
-    simplexStep <- function(P, FAC)
-    {
-        ## Extrapolates by a factor FAC through the face of the simplex across from
-        ## the highest (i.e. worst) point.
-        worst <- nPOINTS_SIMPLEX
-        centr <- apply(P[-worst,,drop=FALSE], 2, mean)
-        newpar <- centr*(1-FAC) + P[worst,]*FAC
-        newpar
-    }
-
-
-    ## initialize population matrix
-    POPULATION <- matrix(as.numeric(NA), nrow = nPOINTS, ncol = NDIM)
-    if (!is.null(names(par)))
-        colnames(POPULATION) <- names(par)
-    POP.FITNESS <- numeric(length = nPOINTS)
-    POPULATION[1,] <- par
-
-    ## generate initial parameter values by random uniform sampling
-    finitelower <- ifelse(is.infinite(lower), -(abs(par)+2)*5, lower)
-    finiteupper <- ifelse(is.infinite(upper), +(abs(par)+2)*5, upper)
-    if (control$initsample == "latin") {
-        for (i in 1:NDIM) {
-            tmp <- seq(finitelower[i], finiteupper[i], length = nPOINTS-1)
-            tmp <- jitter(tmp, factor = 2)
-            tmp <- pmax(finitelower[i], pmin(finiteupper[i], tmp))
-            POPULATION[-1,i] <- sample(tmp)
-        }
-    } else {
-        for (i in 1:NDIM)
-            POPULATION[-1,i] <- runif(nPOINTS-1, finitelower[i], finiteupper[i])
-    }
-
-    ## only store all iterations if requested -- could be big!
-    if (!is.finite(MAXIT)) {
-        MAXIT <- 10000
-        warning("setting maximum iterations to 10000")
-    }
-    if (returnpop) {
-        POP.ALL <- array(as.numeric(NA), dim = c(nPOINTS, NDIM, MAXIT))
-        if (!is.null(names(par)))
-            dimnames(POP.ALL)[[2]] <- names(par)
-    }
-    POP.FIT.ALL <- matrix(as.numeric(NA), ncol = nPOINTS, nrow = MAXIT)
-    BESTMEM.ALL <- matrix(as.numeric(NA), ncol = NDIM, nrow = MAXIT)
-    if (!is.null(names(par)))
-        colnames(BESTMEM.ALL) <- names(par)
-
-    ## the output object
-    obj <- list()
-    class(obj) <- c("SCEoptim", class(obj))
-    obj$call <- match.call()
-    obj$control <- control
-
-    EXITFLAG <- NA
-    EXITMSG <- NULL
-
-    ## initialize timer
-    tic <- as.numeric(Sys.time())
-    toc <- 0
-
-    ## calculate cost for each point in initial population
-    for (i in 1:nPOINTS)
-        POP.FITNESS[i] <- costFunction(FUN, POPULATION[i,], ...)
-
-    ## sort the population in order of increasing function values
-    idx <- order(POP.FITNESS)
-    POP.FITNESS <- POP.FITNESS[idx]
-    POPULATION <- POPULATION[idx,,drop=FALSE]
-
-    ## store one previous iteration only
-    POP.PREV <- POPULATION
-    POP.FIT.PREV <- POP.FITNESS
-
-    if (returnpop) {
-        POP.ALL[,,1] <- POPULATION
-    }
-    POP.FIT.ALL[1,] <- POP.FITNESS
-    BESTMEM.ALL[1,] <- POPULATION[1,]
-
-    ## store best solution from last two iterations
-    prevBestVals <- rep(Inf, control$tolsteps)
-    prevBestVals[1] <- POP.FITNESS[1]
-
-    ## for each iteration...
-    i <- 0
-    while (i < MAXIT) {
-
-        i <- i + 1
-
-        ## The population matrix POPULATION will now be rearranged into complexes.
-
-        ## For each complex ...
-        for (j in 1:nCOMPLEXES) {
-
-            ## construct j-th complex from POPULATION
-
-            k1 <- 1:nPOINTS_COMPLEX
-            k2 <- (k1-1) * nCOMPLEXES + j
-
-            COMPLEX <- POP.PREV[k2,,drop=FALSE]
-            COMPLEX_FITNESS <- POP.FIT.PREV[k2]
-
-            ## Each complex evolves a number of steps according to the competitive
-            ## complex evolution (CCE) algorithm as described in Duan et al. (1992).
-            ## Therefore, a number of 'parents' are selected from each complex which
-            ## form a simplex. The selection of the parents is done so that the better
-            ## points in the complex have a higher probability to be selected as a
-            ## parent. The paper of Duan et al. (1992) describes how a trapezoidal
-            ## probability distribution can be used for this purpose.
-
-            for (k in 1:CCEITER) {
-
-                ## select simplex by sampling the complex
-
-                ## sample points with "trapezoidal" i.e. linear probability
-                weights <- rev(ppoints(nPOINTS_COMPLEX))
-                ## 'elitism' parameter can give more weight to the better results:
-                weights <- weights ^ control$elitism
-                LOCATION <- sample(seq(1,nPOINTS_COMPLEX), size = nPOINTS_SIMPLEX,
-                                   prob = weights)
-
-                LOCATION <- sort(LOCATION)
-
-                ## construct the simplex
-                SIMPLEX <- COMPLEX[LOCATION,,drop=FALSE]
-                SIMPLEX_FITNESS <- COMPLEX_FITNESS[LOCATION]
-
-                worst <- nPOINTS_SIMPLEX
-
-                ## generate new point for simplex
-
-                ## first extrapolate by a factor -1 through the face of the simplex
-                ## across from the high point,i.e.,reflect the simplex from the high point
-                parRef <- simplexStep(SIMPLEX, FAC = -1)
-                fitRef <- costFunction(FUN, parRef, ...)
-
-                ## check the result
-                if (fitRef <= SIMPLEX_FITNESS[1]) {
-                    ## gives a result better than the best point,so try an additional
-                    ## extrapolation by a factor 2
-                    parRefEx <- simplexStep(SIMPLEX, FAC = -2)
-                    fitRefEx <- costFunction(FUN, parRefEx, ...)
-                    if (fitRefEx < fitRef) {
-                        SIMPLEX[worst,] <- parRefEx
-                        SIMPLEX_FITNESS[worst] <- fitRefEx
-                        ALGOSTEP <- 'reflection and expansion'
-                    } else {
-                        SIMPLEX[worst,] <- parRef
-                        SIMPLEX_FITNESS[worst] <- fitRef
-                        ALGOSTEP <- 'reflection'
-                    }
-                } else if (fitRef >= SIMPLEX_FITNESS[worst-1]) {
-                    ## the reflected point is worse than the second-highest, so look
-                    ## for an intermediate lower point, i.e., do a one-dimensional
-                    ## contraction
-                    parCon <- simplexStep(SIMPLEX, FAC = -0.5)
-                    fitCon <- costFunction(FUN, parCon, ...)
-                    if (fitCon < SIMPLEX_FITNESS[worst]) {
-                        SIMPLEX[worst,] <- parCon
-                        SIMPLEX_FITNESS[worst] <- fitCon
-                        ALGOSTEP <- 'one dimensional contraction'
-                    } else {
-                        ## can't seem to get rid of that high point, so better contract
-                        ## around the lowest (best) point
-                        SIMPLEX <- (SIMPLEX + rep(SIMPLEX[1,], each=nPOINTS_SIMPLEX)) / 2
-                        for (k in 2:NDIM)
-                            SIMPLEX_FITNESS[k] <- costFunction(FUN, SIMPLEX[k,], ...)
-                        ALGOSTEP <- 'multiple contraction'
-                    }
-                } else {
-                    ## if better than second-highest point, use this point
-                    SIMPLEX[worst,] <- parRef
-                    SIMPLEX_FITNESS[worst] <- fitRef
-                    ALGOSTEP <- 'reflection'
-                }
-
-                if (trace >= 3) {
-                    message(ALGOSTEP)
-                }
-
-                ## replace the simplex into the complex
-                COMPLEX[LOCATION,] <- SIMPLEX
-                COMPLEX_FITNESS[LOCATION] <- SIMPLEX_FITNESS
-
-                ## sort the complex
-                idx <- order(COMPLEX_FITNESS)
-                COMPLEX_FITNESS <- COMPLEX_FITNESS[idx]
-                COMPLEX <- COMPLEX[idx,,drop=FALSE]
-            }
-
-            ## replace the complex back into the population
-            POPULATION[k2,] <- COMPLEX
-            POP.FITNESS[k2] <- COMPLEX_FITNESS
-        }
-
-        ## At this point, the population was divided in several complexes, each of which
-        ## underwent a number of iteration of the simplex (Metropolis) algorithm. Now,
-        ## the points in the population are sorted, the termination criteria are checked
-        ## and output is given on the screen if requested.
-
-        ## sort the population
-        idx <- order(POP.FITNESS)
-        POP.FITNESS <- POP.FITNESS[idx]
-        POPULATION <- POPULATION[idx,,drop=FALSE]
-        if (returnpop) {
-            POP.ALL[,,i] <- POPULATION
-        }
-        POP.FIT.ALL[i,] <- POP.FITNESS
-        BESTMEM.ALL[i,] <- POPULATION[1,]
-
-        curBest <- POP.FITNESS[1]
-
-        ## end the optimization if one of the stopping criteria is met
-
-        prevBestVals <- c(curBest, head(prevBestVals, -1))
-        reltol <- control$reltol
-        if (all(abs(diff(prevBestVals)) <= reltol * (abs(curBest)+reltol))) {
-            EXITMSG <- 'Change in solution over [tolsteps] less than specified tolerance (reltol).'
-            EXITFLAG <- 0
-        }
-
-        ## give user feedback on screen if requested
-        if (trace >= 1) {
-            if (i == 1) {
-                message(' Nr Iter Nr Fun Eval Current best function Current worst function')
-            }
-            if ((i %% control$REPORT == 0) || (!is.na(EXITFLAG)))
-            {
-                message(sprintf(' %5.0f %5.0f %12.6g %12.6g',
-                        i, funevals, min(POP.FITNESS), max(POP.FITNESS)))
-                if (trace >= 2)
-                    message("parameters: ", toString(signif(POPULATION[1,], 3)))
-            }
-        }
-
-        if (!is.na(EXITFLAG))
-            break
-
-        if ((i >= control$maxit) || (funevals >= control$maxeval)) {
-            EXITMSG <- 'Maximum number of function evaluations or iterations reached.'
-            EXITFLAG <- 1
-            break
-        }
-
-        toc <- as.numeric(Sys.time()) - tic
-        if (toc > control$maxtime) {
-            EXITMSG <- 'Exceeded maximum time.'
-            EXITFLAG <- 2
-            break
-        }
-
-        ## go to next iteration
-        POP.PREV <- POPULATION
-        POP.FIT.PREV <- POP.FITNESS
-    }
-    if (trace >= 1)
-        message(EXITMSG)
-
-    ## return solution
-    obj$par <- POPULATION[1,]
-    obj$value <- POP.FITNESS[1]
-    obj$convergence <- EXITFLAG
-    obj$message <- EXITMSG
-
-    ## store number of function evaluations
-    obj$counts <- funevals
-    ## store number of iterations
-    obj$iterations <- i
-    ## store the amount of time taken
-    obj$time <- toc
-
-    if (returnpop) {
-        ## store information on the population at each iteration
-        obj$POP.ALL <- POP.ALL[,,1:i]
-        dimnames(obj$POP.ALL)[[3]] <- paste("iteration", 1:i)
-    }
-    obj$POP.FIT.ALL <- POP.FIT.ALL[1:i,]
-    obj$BESTMEM.ALL <- BESTMEM.ALL[1:i,]
-
-    obj
-}
-
-```
+This process uses the `hydromad::sceOptim()` function. Scott originally copied this function into his code, but I'll use the `hydromad` package instead.
 
 ```{r scot arma modify, echo=FALSE}
 VAR_COV_ARMA <- function(parameters,num_AR,num_MA) {
@@ -1221,7 +847,7 @@ Adjust_WARM_Model <- function (Stdev_Change,Lag1_Change,e_var_org,AR_org,MA_org,
 	}
 
 
-	result <- SCEoptim(VAR_COV_ARMA_Alteration,start_par,num_AR,num_MA,VAR_TARGET,LAG1_TARGET,e_var_org,AR_org,MA_org,Other_e_var,Other_AR, Other_MA,cur_dir,lower=lowerb,upper=upperb)
+	result <- hydromad::SCEoptim(VAR_COV_ARMA_Alteration,start_par,num_AR,num_MA,VAR_TARGET,LAG1_TARGET,e_var_org,AR_org,MA_org,Other_e_var,Other_AR, Other_MA,cur_dir,lower=lowerb,upper=upperb)
 	new_parameters <- result$par
 	RESULT <- VAR_COV_ARMA(new_parameters,num_AR,num_MA)
 	VAR_UPDATE <- sum(VAR_OTHER,RESULT[[1]])
@@ -1314,6 +940,149 @@ adjust.noise.model(models=models, lag1.factor=0.5, sd.factor=1)[['NOISE']] %>%
   forecast(h=40) %>%
   plot(main="Lag1=2, sd=1")
 ```
+
+# weatherGen Package
+
+We can repeat the same analysis using the `weatherGen` package.
+
+## Wavelet Analysis
+
+First, perform the wavelet analysis.
+
+```{r wgen wave}
+wgen_wave <- weatherGen::wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, 
+                                          noise.type='white')
+```
+
+Then reconstruct the wavelet components.
+
+```{r}
+wgen_wave.comp <- weatherGen::wavelet_components(x=clim.wyr$PRCP, 
+                                                 wt=wgen_wave, 
+                                                 n.periods=1, 
+                                                 sig.periods=c(11,12), 
+                                                 n.comp.periods=2)
+```
+
+## Create ARIMA Models
+
+Now create the arima models.
+
+```{r wgen arima models}
+wgen_models <- weatherGen::arima_models(components=wgen_wave.comp)
+```
+
+Here is a plot of the forecasts for each component arima model (top panel is the noise component, bottom panel is the wavelet component).
+
+```{r wgen plot forecast}
+par(mfrow=c(2,1))
+plot(forecast(wgen_models[["NOISE"]], h=nrow(clim.wyr)))
+plot(forecast(wgen_models[["COMPONENT 1"]], h=nrow(clim.wyr)))
+par(mfrow=c(1,1))
+```
+
+## ARIMA Model Simulations
+
+Simulations for each ARIMA models are generated using the `weatherGen::simulate.arima()` function.
+
+```{r wgen simulate arima}
+weatherGen::simulate_arima(model=wgen_models[['COMPONENT 1']], n=40)
+```
+
+And the `weatherGen::simulate.arimas()` function can then be used to simulate a list of arima models containing multiple components (noise and wavelet).
+
+```{r wgen simulate arimas}
+wgen_sim.warm <- weatherGen::simulate_arimas(models=wgen_models, n=40)
+wgen_sim.warm
+```
+
+Here is a plot of the resulting simulated annual precipitation timeseries.
+
+```{r wgen plot sim precip}
+plot(wgen_sim.warm$sum, type='l', xlab='Timestep (year)', ylab='Simulated Annual Precip (mm)')
+```
+
+We can then perform a wavelet analysis of the simulated precipitation to compare the GWS of the observed timeseries with that of the simulated timeseries.
+
+```{r wgen wavelet analysis sim precip}
+wgen_wt.sim.warm <- weatherGen::wavelet_analysis(wgen_sim.warm$sum, sig.level=0.90,
+                                                 noise.type='white')
+```
+
+Finally, we can use the `weatherGen::mc_arima()` function to perform a Monte Carlo simulation by repeating this procedure multiple times.
+
+```{r wgen mc arimas, message=FALSE, warning=FALSE}
+wgen_mc <- weatherGen::mc_arimas(models=wgen_models, n=40, n.iter=100)
+str(wgen_mc)
+```
+
+This plot shows the mean across the simulation timeseries, with the shaded region representing the 2.5 and 97.5 percent quantiles.
+
+```{r plot wgen mc x}
+par(mfrow=c(1,1))
+plot(wgen_mc$x.stat[, 'MEAN'], type='n', 
+     xlab="Water Year", ylab="Simulated Precip (mm/yr)",
+     ylim=range(wgen_mc$x.stat))
+polygon(c(seq(1, nrow(wgen_mc$x.stat)),
+          rev(seq(1, nrow(wgen_mc$x.stat)))),
+        c(wgen_mc$x.stat[, 'Q025'],
+          rev(wgen_mc$x.stat[, 'Q975'])),col="grey")
+lines(wgen_mc$x.stat[, 'MEAN'], col='red')
+```
+
+This figure shows each individual simulated timeseries (the red line is the overall mean).
+
+```{r plot wgen mc x ggplot}
+as.data.frame(wgen_mc$x) %>% 
+  mutate(YEAR=seq(1:nrow(wgen_mc$x))) %>%
+  gather(TRIAL, VALUE, -YEAR) %>% 
+  ggplot(aes(YEAR, VALUE)) +
+  geom_line(aes(group=TRIAL), alpha=0.1) +
+  stat_summary(fun.y=mean, geom='line', color='red') +
+  labs(x='Year', y="Simulated Annual Precip (mm/yr)")
+```
+
+This figure summarises the spectrum power for each period, and compares the mean, standard deviation and skew of the simulated (blue) and observed (red) annual timeseries.
+
+```{r wgen plot mc summary, fig.height=8}
+par(mfrow=c(2,2))
+x1 <- 1
+x2 <- length(wgen_wave$period)
+ymin <- min(wgen_wave$period, wgen_wave$gws,
+            wgen_mc$gws.stat[x1:x2, 'MEAN'],
+            wgen_mc$gws.stat[x1:x2, 'Q025'])
+ymax <- max(wgen_wave$period, wgen_wave$gws,
+            sim.warm.gws.stat[x1:x2, 'MEAN'],
+            sim.warm.gws.stat[x1:x2, 'Q975'])
+plot(wgen_wave$period, wgen_wave$gws,
+     type="n", ylim=c(ymin,ymax), xlab="Period (years)", ylab="",
+     main="", log="y")
+mtext(side=2, expression(paste("Power (",mm^2,")")), line=2.5)
+polygon(c(wgen_wave$period,
+          rev(wgen_wave$period)),
+        c(sim.warm.gws.stat[x1:x2, 'Q025'],
+          rev(sim.warm.gws.stat[x1:x2, 'Q975'])),
+        col="grey")
+lines(wgen_wave$period, wgen_wave$gws)
+lines(wgen_wave$period, sim.warm.gws.stat[x1:x2, 'MEAN'], lty=2, col="blue")
+lines(wgen_wave$period, wgen_wave$gws.sig$signif, col="red", lty=3)
+
+boxplot(colMeans(wgen_mc$x), main="Mean")
+points(mean(clim.wyr$PRCP),col="red",pch=19)
+points(mean(colMeans(wgen_mc$x)), col="blue", pch=19)
+
+boxplot(apply(wgen_mc$x, 2, sd), main="Standard Deviation")
+points(sd(clim.wyr$PRCP), col="red", pch=19)
+points(mean(apply(wgen_mc$x, 2, sd)), col="blue", pch=19)
+
+boxplot(apply(wgen_mc$x, 2, skewness), main="Skew")
+points(skewness(clim.wyr$PRCP), col="red", pch=19)
+points(mean(apply(wgen_mc$x, 2, skewness)),col="blue",pch=19)
+```
+
+The figure above shows the distributions of power, mean, standard deviation and skewness for the monte carlo simulations of the arima models. The GWS power for the historical data is the black line, the mean GWS power for the arima models is the blue line, and the significance thresholds is the red line. The shaded area is the 2.5-97.5% confidence interval of the simulated GWS power. 
+
+The boxplots are the distributions of the three statistics for the monte carlo simulations, the red dot is the statistic of the historical timeseries, and the blue dot is the mean statistic for the simulated timeseries.
 
 # Session Info
 
