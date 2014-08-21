@@ -6,7 +6,7 @@
 #' @export
 #' @examples
 #' wavelet_analysis(x=runif(30)*100+200, sig=0.90, noise.type="white", plot.flag=TRUE)
-
+#'
 wavelet_analysis <- function(x, sig.level=0.90, noise.type=c("white", "red")) {
   noise.type <- match.arg(noise.type)
   lag1 <- switch(noise.type,
