@@ -18,7 +18,7 @@ arima_models <- function(components) {
 #' @examples
 #' library(forecast)
 #' model <- auto.arima(sin(1:50)+rnorm(50)+10, max.p=2, max.q=2, max.P=0, max.Q=0, stationary=TRUE)
-#' simulate.arima(model, n=40)
+#' simulate_arima(model, n=40)
 
 simulate_arima <- function(model, n) {
   sim <- arima.sim(n=n,
@@ -52,7 +52,7 @@ simulate_arima <- function(model, n) {
 #' simulate_arimas(models, n=40)
 simulate_arimas <- function(models, n, components=TRUE) {
   # run simulation on each model and combine into 2-d array
-  sim.components <- lapply(models, simulate.arima, n=n) %>% sapply(cbind)
+  sim.components <- lapply(models, simulate_arima, n=n) %>% sapply(cbind)
 
   # compute sum of individual component simulations
   if (ncol(sim.components) > 1) {
