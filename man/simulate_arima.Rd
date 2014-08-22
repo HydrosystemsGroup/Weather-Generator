@@ -16,6 +16,6 @@ Run simulation of an arima model
 \examples{
 library(forecast)
 model <- auto.arima(sin(1:50)+rnorm(50)+10, max.p=2, max.q=2, max.P=0, max.Q=0, stationary=TRUE)
-simulate.arima(model, n=40)
+simulate_arima(model, n=40)
 }
 
