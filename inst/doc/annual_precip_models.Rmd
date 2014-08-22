@@ -35,7 +35,7 @@ clim.da <- group_by(climate, DATE) %>%
 
 # aggregate by water year
 clim.wyr <- clim.da %>%
-  mutate(WYEAR=ifelse(month(DATE)>=10, year(DATE)+1, year(DATE))) %>%
+  mutate(WYEAR=wyear(DATE)) %>%
   group_by(WYEAR) %>%
   summarise(N=n(),
             PRCP=sum(PRCP),
@@ -1052,19 +1052,19 @@ ymin <- min(wgen_wave$period, wgen_wave$gws,
             wgen_mc$gws.stat[x1:x2, 'MEAN'],
             wgen_mc$gws.stat[x1:x2, 'Q025'])
 ymax <- max(wgen_wave$period, wgen_wave$gws,
-            sim.warm.gws.stat[x1:x2, 'MEAN'],
-            sim.warm.gws.stat[x1:x2, 'Q975'])
+            wgen_mc$gws.stat[x1:x2, 'MEAN'],
+            wgen_mc$gws.stat[x1:x2, 'Q975'])
 plot(wgen_wave$period, wgen_wave$gws,
      type="n", ylim=c(ymin,ymax), xlab="Period (years)", ylab="",
      main="", log="y")
 mtext(side=2, expression(paste("Power (",mm^2,")")), line=2.5)
 polygon(c(wgen_wave$period,
           rev(wgen_wave$period)),
-        c(sim.warm.gws.stat[x1:x2, 'Q025'],
-          rev(sim.warm.gws.stat[x1:x2, 'Q975'])),
+        c(wgen_mc$gws.stat[x1:x2, 'Q025'],
+          rev(wgen_mc$gws.stat[x1:x2, 'Q975'])),
         col="grey")
 lines(wgen_wave$period, wgen_wave$gws)
-lines(wgen_wave$period, sim.warm.gws.stat[x1:x2, 'MEAN'], lty=2, col="blue")
+lines(wgen_wave$period, wgen_mc$gws.stat[x1:x2, 'MEAN'], lty=2, col="blue")
 lines(wgen_wave$period, wgen_wave$gws.sig$signif, col="red", lty=3)
 
 boxplot(colMeans(wgen_mc$x), main="Mean")

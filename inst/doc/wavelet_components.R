@@ -20,7 +20,7 @@ clim.da <- group_by(climate, DATE) %>%
 
 # aggregate by water year
 clim.wyr <- clim.da %>%
-  mutate(WYEAR=ifelse(month(DATE)>=10, year(DATE)+1, year(DATE))) %>%
+  mutate(WYEAR=wyear(DATE)) %>%
   group_by(WYEAR) %>%
   summarise(N=n(),
             PRCP=sum(PRCP),

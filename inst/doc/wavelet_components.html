@@ -9,7 +9,7 @@
 <meta http-equiv="Content-Style-Type" content="text/css" />
 <meta name="generator" content="pandoc" />
 
-<meta name="author" content="Jeffrey D Walker" />
+<meta name="author" content="Jeffrey D Walker, PhD" />
 
 <meta name="date" content="2014-08-18" />
 
@@ -55,7 +55,7 @@ if (window.hljs && document.readyState && document.readyState === "complete") {
 
 <div id="header">
 <h1 class="title">Wavelet Components</h1>
-<h4 class="author"><em>Jeffrey D Walker</em></h4>
+<h4 class="author"><em>Jeffrey D Walker, PhD</em></h4>
 <h4 class="date"><em>August 18, 2014</em></h4>
 </div>
 
@@ -99,7 +99,7 @@ clim.da &lt;- group_by(climate, DATE) %&gt;%
 
 # aggregate by water year
 clim.wyr &lt;- clim.da %&gt;%
-  mutate(WYEAR=ifelse(month(DATE)&gt;=10, year(DATE)+1, year(DATE))) %&gt;%
+  mutate(WYEAR=wyear(DATE)) %&gt;%
   group_by(WYEAR) %&gt;%
   summarise(N=n(),
             PRCP=sum(PRCP),
@@ -290,29 +290,31 @@ comps.combine.wgen %&gt;%
 ## [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
 ## 
 ## attached base packages:
-## [1] stats     graphics  grDevices utils     datasets  methods   base     
+## [1] splines   grid      stats     graphics  grDevices utils     datasets 
+## [8] methods   base     
 ## 
 ## other attached packages:
-##  [1] stringr_0.6.2    biwavelet_0.17.3 weatherGen_0.1   ggplot2_1.0.0   
-##  [5] lubridate_1.3.3  tidyr_0.1        dplyr_0.2        forecast_5.4    
-##  [9] timeDate_3010.98 zoo_1.7-11       devtools_1.5    
+##  [1] biwavelet_0.17.3 weatherGen_0.1   devtools_1.5     Hmisc_3.14-4    
+##  [5] Formula_1.1-1    survival_2.37-7  lattice_0.20-29  mapproj_1.2-2   
+##  [9] maps_2.3-7       ggmap_2.3        ggplot2_1.0.0    lubridate_1.3.3 
+## [13] stringr_0.6.2    tidyr_0.1        dplyr_0.2        forecast_5.4    
+## [17] timeDate_3010.98 zoo_1.7-11      
 ## 
 ## loaded via a namespace (and not attached):
 ##  [1] assertthat_0.1      car_2.0-20          cluster_1.15.2     
 ##  [4] colorspace_1.2-4    digest_0.6.4        evaluate_0.5.5     
-##  [7] fields_7.1          formatR_0.10        Formula_1.1-1      
-## [10] fracdiff_1.4-2      grid_3.1.1          gtable_0.1.2       
-## [13] Hmisc_3.14-4        htmltools_0.2.4     httr_0.3           
-## [16] hydromad_0.9-20     knitr_1.6           labeling_0.2       
-## [19] lattice_0.20-29     latticeExtra_0.6-26 magrittr_1.0.1     
-## [22] maps_2.3-7          MASS_7.3-33         memoise_0.2.1      
-## [25] munsell_0.4.2       nnet_7.3-8          parallel_3.1.1     
-## [28] plyr_1.8.1          proto_0.3-10        quadprog_1.5-5     
-## [31] RColorBrewer_1.0-5  Rcpp_0.11.2         RCurl_1.95-4.1     
-## [34] reshape2_1.4        rmarkdown_0.2.50    scales_0.2.4       
-## [37] spam_0.41-0         splines_3.1.1       survival_2.37-7    
-## [40] tools_3.1.1         tseries_0.10-32     whisker_0.3-2      
-## [43] yaml_2.1.13</code></pre>
+##  [7] fields_7.1          formatR_0.10        fracdiff_1.4-2     
+## [10] gtable_0.1.2        htmltools_0.2.4     httr_0.3           
+## [13] hydromad_0.9-20     knitr_1.6           labeling_0.2       
+## [16] latticeExtra_0.6-26 magrittr_1.0.1      MASS_7.3-33        
+## [19] memoise_0.2.1       munsell_0.4.2       nnet_7.3-8         
+## [22] parallel_3.1.1      plyr_1.8.1          png_0.1-7          
+## [25] proto_0.3-10        quadprog_1.5-5      RColorBrewer_1.0-5 
+## [28] Rcpp_0.11.2         RCurl_1.95-4.1      reshape2_1.4       
+## [31] RgoogleMaps_1.2.0.6 rjson_0.2.14        RJSONIO_1.2-0.2    
+## [34] rmarkdown_0.2.50    scales_0.2.4        spam_0.41-0        
+## [37] tools_3.1.1         tseries_0.10-32     whisker_0.3-2      
+## [40] yaml_2.1.13</code></pre>
 </div>
 
 
