@@ -166,7 +166,7 @@ This figure shows a 20-year forecast of the arima model reflecting no low-freque
 
 ```{r plot arima forecast}
 par(mfrow=c(1,1))
-plot(forecast(models[['PRCP']], h=20), main="ARIME Forecast of Regional Annual Precip",
+plot(forecast(models[['PRCP']], h=20), main="ARIMA Forecast of Regional Annual Precip",
      xlab="Timestep (yr)", ylab='Annual Precip (mm/yr)')
 ```
 
@@ -503,6 +503,72 @@ do.call(rbind, gen.loc.yr) %>%
     facet_wrap(~VAR, scales='free_y') +
     labs(x="", y="Skewness", title="Skewness of Annual Precipitation for Generated (Red) and Observed (Blue)") +
     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+```
+
+# Climate Change Trends
+
+Linear trends are incorporated in the generated timeseries using an additive temperature factor and a multiplicative precipitation factor. 
+
+```{r compute trends}
+trend.prcp <- 1.5 # multiplicative trend factor
+trend.temp <- 2   # additive trend factor
+
+# select one trial at random
+sim.trial <- sample(dim(gen.loc.mon.arr)[3], 1)     
+
+sim.clim <- data.frame(YEAR=clim.reg.mon$YEAR,
+                       MONTH=clim.reg.mon$MONTH,
+                       TRIAL=sim.trial,
+                       TREND.TEMP=trend.temp,
+                       TREND.PRCP=trend.prcp,
+                       PRCP.GEN=gen.loc.mon.arr[, 1, sim.trial],
+                       TMAX.GEN=gen.loc.mon.arr[, 2, sim.trial],
+                       TMIN.GEN=gen.loc.mon.arr[, 3, sim.trial],
+                       TAVG.GEN=gen.loc.mon.arr[, 4, sim.trial]) %>%
+  # compute trend timeseries
+  mutate(PRCP.TREND=PRCP.GEN * seq(1, trend.prcp, length.out=length(PRCP.GEN)),
+         TMAX.TREND=TMAX.GEN + seq(0, trend.temp, length.out=length(TMAX.GEN)),
+         TMIN.TREND=TMIN.GEN + seq(0, trend.temp, length.out=length(TMIN.GEN)),
+         TAVG.TREND=TAVG.GEN + seq(0, trend.temp, length.out=length(TAVG.GEN)))
+```
+
+This figure compares the original generate timeseries to the adjusted timeseries for the given trend factors.
+
+```{r clim gen trend, fig.height=8}
+sim.clim %>%
+  gather(VAR.GROUP, VALUE, PRCP.GEN:TAVG.TREND) %>%
+  separate(VAR.GROUP, c("VAR", "GROUP")) %>%
+  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+  ggplot(aes(DATE, VALUE, color=GROUP)) +
+  geom_line() +
+  facet_wrap(~VAR, ncol=1, scales='free_y') +
+  labs(x="Month/Year", y="") +
+  scale_color_manual('', values=c(GEN='grey20', TREND='chartreuse3'),
+                     labels=c(GEN='w/o trend', TREND='w/ trend'))
+```
+
+This figure shows the original climate timeseries for the regional-average dataset and the selected location.
+
+```{r clim loc reg, fig.height=8}
+clim.loc.mon %>%
+  select(-LAT, -LON) %>%
+  mutate(SOURCE="Location") %>%
+  rbind(clim.reg.mon %>% mutate(SOURCE="Region")) %>%
+  mutate(SOURCE=factor(SOURCE)) %>%
+  gather(VAR, VALUE, PRCP:TAVG) %>%
+  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+  ggplot(aes(DATE, VALUE, color=SOURCE)) +
+  geom_line() +
+  labs(x="Month/Year", y="") +
+  scale_color_manual('', values=c('steelblue', 'orangered')) +
+  facet_wrap(~VAR, ncol=1, scales='free_y')
+```
+
+## Stress Test Trends
+
+```{r}
+trend.factors <- expand.grid(PRCP=seq(0.75, 1.25, by=0.05),
+                             TEMP=seq(0, 5, by=0.5))
 ```
 
 # Session Info
