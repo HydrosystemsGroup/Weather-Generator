@@ -11,7 +11,7 @@ output:
 %\VignetteIndexEntry{Monthly Weather Generator}
 -->
 
-# Set Up Libraries
+# Load Libraries
 
 ```{r libraries, warning=FALSE, message=FALSE}
 library(forecast)
@@ -30,27 +30,24 @@ set.seed(2345)
 
 # Load Monthly Climate Data
 
-Get list of files with each file containing a monthly climate dataset for one grid point.
+This analysis will use the [gridded climate dataset by Maurer et al, 2002](http://www.engr.scu.edu/~emaurer/gridded_obs/index_gridded_obs.html). The data have already been downloaded and converted to an SQLite database using the makefile in [walkerjeffd/climate-data/maurer](https://github.com/walkerjeffd/climate-data/tree/master/maurer). After following the instructions in this repo, there should be an SQLite database called `maurer/db/maurer_mon.db`, which contains a `grid` table containing the grid points, and a `data` table containing the monthly timeseries for each grid point. See the [vignette](https://github.com/walkerjeffd/climate-data/blob/master/maurer/vignette/maurer-mon.Rmd) for examples on how to use this database.
 
-```{r get file list}
-DATA_DIR <- '/Users/jeff/Projects/UMass/virtue/data/mon/east'
-files <- list.files(DATA_DIR) %>%
-  str_split('_') %>% 
-  do.call(rbind, .) %>%
-  as.data.frame(stringsAsFactors=FALSE) %>%
-  mutate(FILE=paste(V1, V2, V3, sep="_")) %>%
-  select(FILE, LAT=V2, LON=V3) %>%
-  mutate(LAT=as.numeric(LAT), LON=as.numeric(LON))
+```{r db grid}
+DB_PATH <- '/Users/jeff/Projects/UMass/climate-data/maurer/db/maurer_mon.db'
+db <- src_sqlite(DB_PATH, create = FALSE)
+
+df.grid <- tbl(db, "grid") %>%
+  collect
 ```
 
 Here is a map of the climate data grid points.
 
 ```{r map east, warning=FALSE}
 library(ggmap)
-map <- get_map(location=c(lon=mean(range(files$LON)), lat=mean(range(files$LAT))),
+map <- get_map(location=c(lon=mean(range(df.grid$LON)), lat=mean(range(df.grid$LAT))),
                zoom=4, maptype="satellite", color='bw')
 ggmap(map, darken=c(0.25, "white"), extent="device") +
-  geom_point(aes(x=LON, y=LAT), data=files, color='red', size=1)
+  geom_point(aes(x=LON, y=LAT), data=df.grid, color='red', size=1)
 ```
 
 Zoomed into new england. The green points will be used to compute a regional average.
@@ -60,7 +57,7 @@ map <- get_map(location=c(lon=-72, lat=42),
                zoom=7, maptype="satellite", color='bw')
 ggmap(map, darken=c(0.25, "white"), extent="device") +
   geom_point(aes(x=LON, y=LAT, color=SELECT), 
-             data=mutate(files, SELECT=(LAT>=41 & LAT<=43 & LON>=-74 & LON<=-70)), size=2) +
+             data=mutate(df.grid, SELECT=(LAT>=41 & LAT<=43 & LON>=-74 & LON<=-70)), size=2) +
   geom_vline(aes(xintercept=LON), color='green', linetype=2, 
              data=data.frame(LON=seq(-74, -70))) +
   geom_hline(aes(yintercept=LAT), color='green', linetype=2, 
@@ -68,29 +65,35 @@ ggmap(map, darken=c(0.25, "white"), extent="device") +
   scale_color_manual(values=c("TRUE"="green", "FALSE"="red"), guide=FALSE)
 ```
 
-Extract the points within the selected region.
+## Monthly Climate Dataset
+
+Using the selected grid points, retrieve the monthly timeseries from the database. Also, compute the variable `TAVG` as the arithmetic mean of `TMIN` and `TMAX`.
 
 ```{r climate load}
-clim.raw <- filter(files, LAT>=41, LAT<=43, LON>=-74, LON<=-70) %>%
-  apply(1, function(f) {
-    x <- read.table(file.path(DATA_DIR, f[['FILE']]))
-    names(x) <- c("YEAR", "MONTH", "PRCP","TMAX","TMIN","TAVG")
-    x$LAT <- f['LAT']
-    x$LON <- f['LON']
-    return(x)
-  }) %>%
-  do.call(rbind, .)
-
-clim.mon <- gather(clim.raw, VAR, VALUE, PRCP:TAVG) %>%
-  mutate(VALUE=as.numeric(VALUE))
-
-clim.yr <- group_by(clim.raw, YEAR, LAT, LON) %>%
-  summarise(PRCP=sum(PRCP),
-            TMAX=mean(TMAX),
-            TMIN=mean(TMIN),
-            TAVG=mean(TAVG)) %>%
-  gather(VAR, VALUE, PRCP:TAVG)
+clim.mon <- tbl(db, "data") %>%
+  filter(LAT>=41, LAT<=43, LON>=-74, LON<=-70) %>%
+  collect %>%
+  select(-REGION, -WIND) %>%
+  mutate(TAVG=(TMIN+TMAX)/2) %>%
+  gather(VAR, VALUE, PRCP, TMIN, TMAX, TAVG)
+summary(clim.mon)
 ```
+
+Compute annual timeseries of each climate variable and each location. Note that precipitation is simply the annual sum, while the other three variables are computed as weighted means based on the number of days in each month to get a correct annual mean.
+
+```{r climate yr}
+clim.yr <- spread(clim.mon, VAR, VALUE) %>%
+  mutate(MONTHYEAR=ymd(paste(YEAR,MONTH,1,sep='-')),
+         N_DAY=days_in_month(MONTHYEAR)) %>%
+  group_by(LAT, LON, YEAR) %>%
+  summarise(PRCP=sum(PRCP),
+            TMAX=sum(TMAX*N_DAY)/sum(N_DAY),
+            TMIN=sum(TMIN*N_DAY)/sum(N_DAY),
+            TAVG=sum(TAVG*N_DAY)/sum(N_DAY)) %>%
+  gather(VAR, VALUE, PRCP:TAVG)
+summary(clim.yr)
+```
+
 
 ## Regional Average
 
@@ -101,11 +104,16 @@ clim.reg.mon <- clim.mon %>%
   group_by(YEAR, MONTH, VAR) %>%
   summarise(MEAN=mean(VALUE),
             SD=sd(VALUE))
+summary(clim.reg.mon)
+```
 
+This figure shows the regional average monthly climate timeseries. The shaded region shows mean +/- 1 standard deviation.
+
+```{r plot clim reg mon}
 mutate(clim.reg.mon, DATE=ymd(paste(YEAR,MONTH,1,sep='-'))) %>%
   ggplot(aes(DATE, MEAN)) +
-  geom_ribbon(aes(ymin=MEAN-SD, ymax=MEAN+SD), fill='grey80') +
-  geom_line(color='red') +
+  geom_ribbon(aes(ymin=MEAN-SD, ymax=MEAN+SD), fill='grey50') +
+  geom_line(color='blue') +
   facet_wrap(~VAR, ncol=1, scales='free_y') +
   labs(x="Month/Year", y="Mean +/- StDev")
 ```
@@ -117,17 +125,22 @@ clim.reg.yr <-  clim.yr %>%
   group_by(VAR, YEAR) %>%
   summarise(MEAN=mean(VALUE),
             SD=sd(VALUE))
+summary(clim.reg.yr)
+```
 
+This figure shows the regional-average annual climate timeseries. The shaded region shows the mean +/- 1 standard deviation.
+
+```{r plot clim reg yr}
 ggplot(clim.reg.yr, aes(YEAR, MEAN)) +
   geom_ribbon(aes(ymin=MEAN-SD, ymax=MEAN+SD), fill='grey80') +
-  geom_line(color='red') +
+  geom_line(color='blue') +
   facet_wrap(~VAR, ncol=1, scales='free_y') +
   labs(x="Year", y="Mean +/- StDev")
 ```
 
-Convert the regional average datasets wide format.
+Convert the regional average datasets wide format for use in the weather generator.
 
-```{r clim wide}
+```{r clim reg wide}
 clim.reg.mon <- select(clim.reg.mon, -SD) %>%
   spread(VAR, MEAN)
 head(clim.reg.mon)
@@ -142,15 +155,15 @@ head(clim.reg.yr)
 Perform wavelet analysis on regional average annual precipitation timeseries.
 
 ```{r plot wave, message=FALSE, warning=FALSE}
-wave <- wavelet_analysis(clim.reg.yr$PRCP, sig.level=0.90, noise.type='white')
+wt.reg <- wavelet_analysis(clim.reg.yr$PRCP, sig.level=0.90, noise.type='white')
 
 par(mfrow=c(1,2))
-plot(wave, plot.cb=TRUE, plot.phase=FALSE)
-plot(wave$gws, wave$period, type="b",
-     xlab="Global Wavelet Spectrum", ylab="Fourier Period (Years)",
-     log="y", ylim=rev(range(wave$period)), 
-     xlim=range(c(wave$gws, wave$gws.sig$signif)))
-lines(wave$gws.sig$signif, wave$period, lty=2, col='red')
+plot(wt.reg, plot.cb=TRUE, plot.phase=FALSE)
+plot(wt.reg$gws, wt.reg$period, type="b",
+     xlab="Global Wavelet Spectrum", ylab="",
+     log="y", ylim=rev(range(wt.reg$period)), 
+     xlim=range(c(wt.reg$gws, wt.reg$gws.sig$signif)))
+lines(wt.reg$gws.sig$signif, wt.reg$period, lty=2, col='red')
 ```
 
 Although there are some significant wavelet periods, we'll use a simple arima model of the regional annual precipitation instead of arima models of the wavelet components.
@@ -182,25 +195,25 @@ Compare the GWS power and the mean, standard deviation, and skewness statistics 
 ```{r plot gws stats, fig.height=8}
 par(mfrow=c(2,2))
 x1 <- 1
-x2 <- min(length(wave$period), nrow(sim.prcp$gws))
-ymin <- min(wave$period[x1:x2], wave$gws[x1:x2],
+x2 <- min(length(wt.reg$period), nrow(sim.prcp$gws))
+ymin <- min(wt.reg$period[x1:x2], wt.reg$gws[x1:x2],
             sim.prcp$gws.stat[x1:x2, 'MEAN'],
             sim.prcp$gws.stat[x1:x2, 'Q025'])
-ymax <- max(wave$period[x1:x2], wave$gws[x1:x2],
+ymax <- max(wt.reg$period[x1:x2], wt.reg$gws[x1:x2],
             sim.prcp$gws.stat[x1:x2, 'MEAN'],
             sim.prcp$gws.stat[x1:x2, 'Q975'])
-plot(wave$period[x1:x2], wave$gws[x1:x2],
+plot(wt.reg$period[x1:x2], wt.reg$gws[x1:x2],
      type="n", ylim=c(ymin,ymax), xlab="Period (years)", ylab="",
      main="", log="y")
 mtext(side=2, expression(paste("Power (",mm^2,")")), line=2.5)
-polygon(c(wave$period[x1:x2],
-          rev(wave$period[x1:x2])),
+polygon(c(wt.reg$period[x1:x2],
+          rev(wt.reg$period[x1:x2])),
         c(sim.prcp$gws.stat[x1:x2, 'Q025'],
           rev(sim.prcp$gws.stat[x1:x2, 'Q975'])),
         col="grey")
-lines(wave$period[x1:x2], wave$gws[x1:x2])
-lines(wave$period[x1:x2], sim.prcp$gws.stat[x1:x2, 'MEAN'], lty=2, col="blue")
-lines(wave$period[x1:x2], wave$gws.sig$signif[x1:x2], col="red", lty=3)
+lines(wt.reg$period[x1:x2], wt.reg$gws[x1:x2])
+lines(wt.reg$period[x1:x2], sim.prcp$gws.stat[x1:x2, 'MEAN'], lty=2, col="blue")
+lines(wt.reg$period[x1:x2], wt.reg$gws.sig$signif[x1:x2], col="red", lty=3)
 
 boxplot(colMeans(sim.prcp$x), main="Mean")
 points(mean(clim.reg.yr$PRCP),col="red",pch=19)
@@ -231,7 +244,6 @@ as.data.frame(sim.prcp$x) %>%
 
 # Monthly Weather Generator
 
-
 ## Select Location
 
 First, select a random location from the complete climate dataset.
@@ -254,7 +266,6 @@ clim.loc.mon <- filter(clim.mon, LAT==loc[['LAT']], LON==loc[['LON']]) %>%
   spread(VAR, VALUE) %>%
   arrange(YEAR, MONTH)
 ```
-
 
 ## Nearest Neighbors
 
@@ -331,7 +342,7 @@ merge(distances.top,
 
 Now if we just sample for one year.
 
-```{r}
+```{r sample year}
 sampled.year <- sample(distances.top$YEAR, size=1, prob=distances.top$WEIGHT, replace=TRUE)
 sampled.year
 ```
