@@ -267,6 +267,26 @@ clim.loc.mon <- filter(clim.mon, LAT==loc[['LAT']], LON==loc[['LON']]) %>%
   arrange(YEAR, MONTH)
 ```
 
+
+
+This figure shows the original climate timeseries for the regional-average dataset and the selected location.
+
+```{r plot clim loc reg, fig.height=8}
+clim.loc.mon %>%
+  select(-LAT, -LON) %>%
+  mutate(SOURCE="Location") %>%
+  rbind(clim.reg.mon %>% mutate(SOURCE="Region")) %>%
+  mutate(SOURCE=factor(SOURCE)) %>%
+  gather(VAR, VALUE, PRCP:TAVG) %>%
+  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+  ggplot(aes(DATE, VALUE, color=SOURCE)) +
+  geom_line() +
+  labs(x="Month/Year", y="") +
+  scale_color_manual('', values=c('steelblue', 'orangered')) +
+  facet_wrap(~VAR, ncol=1, scales='free_y')
+```
+
+
 ## Nearest Neighbors
 
 Compute the euclidian distance between a single simulated annual precipitation value and each observed year. The simulated annual precipitation is for the first year in the first simulation trial.
@@ -516,40 +536,87 @@ do.call(rbind, gen.loc.yr) %>%
     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
 ```
 
+## weatherGen Package
+
+The `weatherGen::gen_mon_arma()` function provides a wrapper around these steps to generate multiple monthly timeseries based on the regional annual precipitation timeseries and the location monthly climate timeseries. This function returns a list object containing the following elements:
+
+- `$models`: list of arma models (only 1 if using ARMA model instead of WARM model)
+- `$sim.prcp.yr`: output from `weatherGen::mc_arimas()` containing annual precipitation simulations from the ARMA model
+- `$sim.mon`: unnamed list of length `n.iter` with each element containing a data.frame with the generated monthly timeseries for the given location. The columns `YEAR_OBS` and `PRCP_OBS_YEAR` contain the year and corresponding annual precipitation sampled from the monthly timeseries of the location.
+
+```{r wgen mon arma, warning=FALSE}
+wgen_mon <- weatherGen::gen_month_arma(x.reg.yr=clim.reg.yr, x.loc.mon=clim.loc.mon,
+                                       n.iter=50, n.year=nrow(clim.reg.yr))
+str(wgen_mon, max.level=1)
+```
+
+Here is an example of the simulated monthly timeseries for the first trial.
+
+```{r wgen mon example}
+head(wgen_mon$sim.mon[[1]])
+```
+
+This figure compares the total annual precipitation for the generated monthly timeseries and the annual arma model simulation. Note that the differences between the two reflect the different annual precipitation in the sampled year for the monthly time series and the simulated year from the ARMA model.
+
+```{r plot wgen year compare}
+wgen_mon$sim.mon[[1]] %>%
+  group_by(YEAR_SIM) %>%
+  summarise(PRCP=sum(PRCP),
+            YEAR_OBS=mean(YEAR_OBS),
+            PRCP_OBS=mean(PRCP_OBS_YEAR)) %>%
+  gather(VAR, VALUE, PRCP, PRCP_OBS) %>%
+  ggplot(aes(YEAR_SIM, VALUE, color=VAR)) +
+  geom_line() +
+  labs(x="Year", y="Annual Precipitation (mm)")
+```
+
+This figure shows the first simulation trial of the monthly climate timeseries for the selected location.
+
+```{r plot wgen mon}
+wgen_mon$sim.mon[[1]] %>%
+  select(YEAR_SIM, MONTH, PRCP:TAVG) %>%
+  gather(VAR, VALUE, PRCP:TAVG) %>%
+  mutate(DATE=ymd(paste(YEAR_SIM, MONTH, 1, sep='-'))) %>%
+  ggplot(aes(DATE, VALUE)) +
+  geom_line() +
+  facet_wrap(~VAR, scales='free_y', ncol=1) +
+  labs(x="Month/Year", y="")
+```
+
 # Climate Change Trends
 
-Linear trends are incorporated in the generated timeseries using an additive temperature factor and a multiplicative precipitation factor. 
+After generating the monthly climate timeseries, we can impose linear trends on the timeseries to perform a climate stress test.
+
+## Single Timeseries
+
+The linear trends are incorporated using an additive temperature factor and a multiplicative precipitation factor. For this example, we'll consider an 150% increase in precipitation over the simulation period, and a 2 degC increase in temperature. Note that the same temperature factor is applied to all three temperature variables (TMIN, TMAX, TAVG). We'll impose these trends on only one of the simulated monthly timeseries (chosen at random).
 
 ```{r compute trends}
-trend.prcp <- 1.5 # multiplicative trend factor
-trend.temp <- 2   # additive trend factor
+trend.factors <- list(PRCP=1.5, # multiplicative trend factor
+                      TEMP=2)   # additive trend factor
 
 # select one trial at random
-sim.trial <- sample(dim(gen.loc.mon.arr)[3], 1)     
+sim.gen <- wgen_mon$sim.mon[[sample(length(wgen_mon$sim.mon), 1)]]
 
-sim.clim <- data.frame(YEAR=clim.reg.mon$YEAR,
-                       MONTH=clim.reg.mon$MONTH,
-                       TRIAL=sim.trial,
-                       TREND.TEMP=trend.temp,
-                       TREND.PRCP=trend.prcp,
-                       PRCP.GEN=gen.loc.mon.arr[, 1, sim.trial],
-                       TMAX.GEN=gen.loc.mon.arr[, 2, sim.trial],
-                       TMIN.GEN=gen.loc.mon.arr[, 3, sim.trial],
-                       TAVG.GEN=gen.loc.mon.arr[, 4, sim.trial]) %>%
-  # compute trend timeseries
-  mutate(PRCP.TREND=PRCP.GEN * seq(1, trend.prcp, length.out=length(PRCP.GEN)),
-         TMAX.TREND=TMAX.GEN + seq(0, trend.temp, length.out=length(TMAX.GEN)),
-         TMIN.TREND=TMIN.GEN + seq(0, trend.temp, length.out=length(TMIN.GEN)),
-         TAVG.TREND=TAVG.GEN + seq(0, trend.temp, length.out=length(TAVG.GEN)))
+# create linear trend lines
+trend.lines <- list(PRCP=seq(1, trend.factors[['PRCP']], length.out=nrow(sim.gen)),
+                    TEMP=seq(0, trend.factors[['TEMP']], length.out=nrow(sim.gen)))
+
+sim.trend <- mutate(sim.gen,
+                    PRCP.TREND=PRCP * trend.lines[['PRCP']],
+                    TMAX.TREND=TMAX + trend.lines[['TEMP']],
+                    TMIN.TREND=TMIN + trend.lines[['TEMP']],
+                    TAVG.TREND=TAVG + trend.lines[['TEMP']])
 ```
 
 This figure compares the original generate timeseries to the adjusted timeseries for the given trend factors.
 
 ```{r clim gen trend, fig.height=8}
-sim.clim %>%
-  gather(VAR.GROUP, VALUE, PRCP.GEN:TAVG.TREND) %>%
+sim.trend %>%
+  mutate(PRCP.GEN=PRCP, TMAX.GEN=TMAX, TMIN.GEN=TMIN, TAVG.GEN=TAVG) %>%
+  gather(VAR.GROUP, VALUE, PRCP.GEN:TAVG.GEN, PRCP.TREND:TAVG.TREND) %>%
   separate(VAR.GROUP, c("VAR", "GROUP")) %>%
-  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+  mutate(DATE=ymd(paste(YEAR_SIM, MONTH, 1, sep='-'))) %>%
   ggplot(aes(DATE, VALUE, color=GROUP)) +
   geom_line() +
   facet_wrap(~VAR, ncol=1, scales='free_y') +
@@ -558,28 +625,71 @@ sim.clim %>%
                      labels=c(GEN='w/o trend', TREND='w/ trend'))
 ```
 
-This figure shows the original climate timeseries for the regional-average dataset and the selected location.
+## Multiple Trends for Stress Test
 
-```{r clim loc reg, fig.height=8}
-clim.loc.mon %>%
-  select(-LAT, -LON) %>%
-  mutate(SOURCE="Location") %>%
-  rbind(clim.reg.mon %>% mutate(SOURCE="Region")) %>%
-  mutate(SOURCE=factor(SOURCE)) %>%
-  gather(VAR, VALUE, PRCP:TAVG) %>%
-  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
-  ggplot(aes(DATE, VALUE, color=SOURCE)) +
-  geom_line() +
-  labs(x="Month/Year", y="") +
-  scale_color_manual('', values=c('steelblue', 'orangered')) +
-  facet_wrap(~VAR, ncol=1, scales='free_y')
-```
-
-## Stress Test Trends
+The `weatherGen::trends_mon()` function applies a range of trend factors to the set of  monthly timeseries generated by `weatherGen::gen_month_arma()`. For each pair of temperature and precipitation factors, the function will create a single monthly timeseries by sampling a random iteration from the `gen_month_arma()` output.
 
 ```{r}
-trend.factors <- expand.grid(PRCP=seq(0.75, 1.25, by=0.05),
-                             TEMP=seq(0, 5, by=0.5))
+trend.factors <- list(PRCP=seq(0.75, 1.25, by=0.05),
+                      TEMP=seq(0, 5, by=0.5))
+
+sim.trends <- trends_mon(sim.mon.list=wgen_mon$sim.mon, 
+                         temp.factors=trend.factors[['TEMP']],
+                         prcp.factors=trend.factors[['PRCP']])
+str(sim.trends[[1]])
+```
+
+Now we can merge these trends and add columns containing the trend factors for temperature (`TEMP_FACTOR`) and precipitaiton (`PRCP_FACTOR`).
+
+```{r trend df}
+df.trends <- lapply(sim.trends, function(x) {
+  df <- x$df
+  df$PRCP_FACTOR <- x$trend.factors[['PRCP']]
+  df$TEMP_FACTOR <- x$trend.factors[['TEMP']]
+  return(df)
+}) %>%
+  do.call(rbind, .)
+summary(df.trends)
+```
+
+This figure shows the monthly precipitation timeseries colored by trend magnitude. This figure only shows precipitation timeseries without any temperature trend. You can see some increase with the 'redder' lines that have higher trend factors.
+
+```{r plot prcp trends}
+df.trends %>%
+  filter(TEMP_FACTOR==0) %>%
+  group_by(PRCP_FACTOR) %>%
+  mutate(TIMESTEP=row_number()) %>%
+  ggplot(aes(TIMESTEP, PRCP.TREND, color=PRCP_FACTOR)) +
+  geom_line(alpha=0.2) +
+  scale_color_gradient('Precip Factor', low='green', high='red') +
+  labs(x="Simulation Month", y="Monthly Precipitation (mm)")
+```
+
+This figure shows the generated precipitation timeseries over the complete range of precipitation trend factors including only timeseries with no temperature trend (`TEMP_FACTOR==0`). This figure clearly shows the increasing trends with higher precipitation trend factors.
+
+```{r plot tavg trends}
+df.trends %>%
+  filter(TEMP_FACTOR==0) %>%
+  group_by(TEMP_FACTOR, PRCP_FACTOR, YEAR_SIM) %>%
+  summarise(PRCP=sum(PRCP.TREND)) %>%
+  ggplot(aes(YEAR_SIM, PRCP, color=PRCP_FACTOR, group=PRCP_FACTOR)) +
+  geom_line(alpha=0.7) +
+  scale_color_gradient('Precip Factor', low='green', high='red') +
+  labs(x="Simulation Year", y="Annual Precipitation (mm)")
+```
+
+This figure shows the generated average temperature timeseries over the range of trend factors including only timeseries with no precipitation trend (`PRCP_FACTOR==0`). This figure clearly shows the increasing trends with higher temperature trend factors.
+
+```{r plot temp trends}
+df.trends %>% 
+  filter(PRCP_FACTOR==1) %>%
+  mutate(DATE=ymd(paste(2001, MONTH, 1, sep='-'))) %>%
+  group_by(TEMP_FACTOR, PRCP_FACTOR, YEAR_SIM) %>%
+  summarise(TAVG=sum(TAVG.TREND*days_in_month(DATE))/sum(days_in_month(DATE))) %>%
+  ggplot(aes(YEAR_SIM, TAVG, color=TEMP_FACTOR, group=TEMP_FACTOR)) +
+  geom_line(alpha=0.7) +
+  scale_color_gradient('Precip Factor', low='green', high='red') +
+  labs(x="Simulation Year", y="Annual Mean Temperature (degC)")
 ```
 
 # Session Info
