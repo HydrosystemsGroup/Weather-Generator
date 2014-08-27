@@ -28,37 +28,37 @@
     <div id="content-wrapper">
       <div class="inner clearfix">
         <section id="main-content">
-          <h3>
-<a name="welcome-to-github-pages" class="anchor" href="#welcome-to-github-pages"><span class="octicon octicon-link"></span></a>Welcome to GitHub Pages.</h3>
+          <h3>Welcome</h3>
+          <p>The weatherGen R package provides a set of functions for generating synthetic climate timeseries. The package is designed to be used for performing a climate stress test of water resource systems.</p>
+          
+          <p>This package is based on R scripts written by Scott Steinshneider. More information about these models can be found in Steinschneider and Brown (2013).</p>
 
-<p>This automatic page generator is the easiest way to create beautiful pages for all of your projects. Author your page content here using GitHub Flavored Markdown, select a template crafted by a designer, and publish. After your page is generated, you can check out the new branch:</p>
+          <p><b>NOTE:</b> This package is currently under heavy development. Future changes are not guarranteed to be backwards-compatible. Use at your own risk</p>
 
-<pre><code>$ cd your_repo_root/repo_name
-$ git fetch origin
-$ git checkout gh-pages
+          <h3>Installation</h3>
+          <p>This package can be installed using the devtools package.</p>
+
+<pre><code>library(devtools)
+install_github('walkerjeffd/r-weathergen', build_vignettes=FALSE)
+library(weatherGen)
 </code></pre>
 
-<p>If you're using the GitHub for Mac, simply sync your repository and you'll see the new branch.</p>
+          <h3>Data Sources</h3>
+          <p>This package is currently being developed for use with the [Gridded Meteorological Data: 1949-2010](http://www.engr.scu.edu/~emaurer/gridded_obs/index_gridded_obs.html) by Maurer et al, 2002. Tools for downloading and processing this dataset can be found in the [walkerjeffd/climate-data](https://github.com/walkerjeffd/climate-data) repo.</p>
 
-<h3>
-<a name="designer-templates" class="anchor" href="#designer-templates"><span class="octicon octicon-link"></span></a>Designer Templates</h3>
+          <h3>Examples</h3>
+          <p>A series of example analyses are provided as vignettes. The following list provides links to rendered output of these examples</p>
+          <ul>
+            <li><a href="/inst/doc/wavelet_analysis.html">Wavelet Analysis</a>: demonstrates how to perform a wavelet transform of an annual precipitation timeseries</li>
+            <li><a href="/inst/doc/wavelet_components.html">Wavelet Components</a>: demonstrates how to regenerate the components of a wavelet transform</li>
+            <li><a href="/inst/doc/annual_precip_models.html">Annual Precipitation Models</a>: compares alternate methods for stochastic simulations of annual precipitation timeseries include the WARM and ARMA methods</li>
+            <li><a href="/inst/doc/monthly_weather_generator.html">Monthly Weather Generator</a>: demonstrates how to use the monthly weather generator based on an AR1 model of annual regional precipitation</li>
+          </ul>
 
-<p>We've crafted some handsome templates for you to use. Go ahead and continue to layouts to browse through them. You can easily go back to edit your page before publishing. After publishing your page, you can revisit the page generator and switch to another theme. Your Page content will be preserved if it remained markdown format.</p>
+          <h3>References</h3>
 
-<h3>
-<a name="rather-drive-stick" class="anchor" href="#rather-drive-stick"><span class="octicon octicon-link"></span></a>Rather Drive Stick?</h3>
-
-<p>If you prefer to not use the automatic generator, push a branch named <code>gh-pages</code> to your repository to create a page manually. In addition to supporting regular HTML content, GitHub Pages support Jekyll, a simple, blog aware static site generator written by our own Tom Preston-Werner. Jekyll makes it easy to create site-wide headers and footers without having to copy them across every page. It also offers intelligent blog support and other advanced templating features.</p>
-
-<h3>
-<a name="authors-and-contributors" class="anchor" href="#authors-and-contributors"><span class="octicon octicon-link"></span></a>Authors and Contributors</h3>
-
-<p>You can <a href="https://github.com/blog/821" class="user-mention">@mention</a> a GitHub username to generate a link to their profile. The resulting <code>&lt;a&gt;</code> element will link to the contributor's GitHub Profile. For example: In 2007, Chris Wanstrath (<a href="https://github.com/defunkt" class="user-mention">@defunkt</a>), PJ Hyett (<a href="https://github.com/pjhyett" class="user-mention">@pjhyett</a>), and Tom Preston-Werner (<a href="https://github.com/mojombo" class="user-mention">@mojombo</a>) founded GitHub.</p>
-
-<h3>
-<a name="support-or-contact" class="anchor" href="#support-or-contact"><span class="octicon octicon-link"></span></a>Support or Contact</h3>
-
-<p>Having trouble with Pages? Check out the documentation at <a href="http://help.github.com/pages">http://help.github.com/pages</a> or contact <a href="mailto:support@github.com">support@github.com</a> and we’ll help you sort it out.</p>
+          Steinschneider, S., and C. Brown (2013), A semiparametric multivariate, multisite weather generator with low-frequency variability for use in climate risk assessments, Water Resour. Res., 49, 7205–7220, doi:<a href="http://dx.doi.org/10.1002/wrcr.20528">10.1002/wrcr.20528</a>
+        
         </section>
 
         <aside id="sidebar">
