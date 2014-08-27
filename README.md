@@ -9,11 +9,11 @@ This package is under heavy development and should not be used until its officia
 
 ## Installation
 
-This package must be installed from github using devtools.
+This package must be installed from github using devtools. Note that the vignettes will fail at the moment because they rely on external data.
 
 ```R
 library(devtools)
-install_github('walkerjeffd/r-weathergen')
+install_github('walkerjeffd/r-weathergen', build_vignettes=FALSE)
 library(weatherGen)
 ```
 
@@ -23,7 +23,7 @@ To build from source, run:
 
 ```R
 library(devtools)
-document() 
+document()
 build()
 ```
 
