@@ -3,5 +3,5 @@
 .RData
 ggmapTemp.png
 inst/doc
-scripts/maurer_mon/data
-scripts/maurer_mon/db
+scripts/maurer/data
+scripts/maurer/db
