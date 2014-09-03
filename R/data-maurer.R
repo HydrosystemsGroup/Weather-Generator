@@ -1,0 +1,35 @@
+#' Maurer meterological dataset
+#'
+#' This dataset contains a subset of the monthly meteorological datasets created
+#' by Maurer et al. (2002). Only locations in the east region between latitudes
+#' of 41 N and 43 N are included. This dataset was automatically generated
+#' using the makefile and r scripts located in the \code{/scripts/maurer_mon/}
+#' directory.
+#'
+#' The object \code{maurer} is a two-element list containing
+#'
+#' \itemize{
+#'   \item \code{regional}: data frame of regional average monthly climate timeseries
+#'   \item \code{local}: unnamed list of monthly climate timeseries at 10 random locations within the region
+#' }
+#'
+#' @section Measures:
+#'
+#' Each dataset contains the following variables.
+#'
+#' \itemize{
+#'   \item \code{PRCP}: precipitation (mm)
+#'   \item \code{TMIN}, \code{TMAX}: minimum and maximum temperature (degC)
+#'   \item \code{WIND}: wind speed (m/s)
+#' }
+#' @docType data
+#' @name maurer
+#' @usage maurer
+#' @references
+#'   Maurer, E.P., A.W. Wood, J.C. Adam, D.P. Lettenmaier, and B. Nijssen, 2002,
+#'   A Long-Term Hydrologically-Based Data Set of Land Surface Fluxes and States
+#'   for the Conterminous United States, J. Climate 15, 3237-3251.
+#'   \url{http://www.engr.scu.edu/~emaurer/gridded_obs/index_gridded_obs.html}
+#' @examples
+#' maurer
+NULL
