@@ -47,10 +47,6 @@ files <- list.files(DATA_DIR) %>%
          LON=as.numeric(LON))
 cat('Found', nrow(files), 'files\n')
 
-cat('Extracting files with 41 <= LAT <= 43\n')
-files <- filter(files, LAT>=41, LAT<=43)
-cat('There are', nrow(files), 'files remaining\n')
-
 # helper function
 read.climate.file <- function(dir, file) {
   x <- read.table(file.path(dir, file))

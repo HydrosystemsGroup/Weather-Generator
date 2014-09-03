@@ -15,6 +15,9 @@ if (!file.exists(DB_PATH)) {
   stop(paste0("Input database does not exist: ", DB_PATH))
 }
 
+# set lat limits
+LAT_LIMITS <- c(40, 90)
+
 # load libraries
 library(dplyr)
 library(lubridate)
@@ -24,9 +27,16 @@ cat(paste0(rep('-', 80), collapse=''), '\n')
 cat('Connecting to database:',DB_PATH,'\n')
 db <- src_sqlite(DB_PATH, create = FALSE)
 
+# extract grid points
+grid <- tbl(db, "grid") %>%
+  filter(LAT>=LAT_LIMITS[1], LAT<=LAT_LIMITS[2]) %>%
+  collect %>%
+  as.data.frame
+
 # compute regional average monthly timeseries
 cat('Computing regional average monthly timeseries\n')
 regional <- tbl(db, "data") %>%
+  filter(LAT>=LAT_LIMITS[1], LAT<=LAT_LIMITS[2]) %>%
   group_by(YEAR, MONTH) %>%
   summarise(PRCP=mean(PRCP),
             TMAX=mean(TMAX),
@@ -37,14 +47,12 @@ regional <- tbl(db, "data") %>%
   as.data.frame
 
 
-cat('Extracting monthly timeseries for 10 random locations\n')
-# choose 10 random locations
+cat('Extracting monthly timeseries for 100 random locations\n')
+# choose 100 random locations
 set.seed(1234)
-locs <- tbl(db, "data") %>%
-  select(LAT, LON) %>%
-  collect %>%
+locs <- select(grid, LAT, LON) %>%
   unique %>%
-  sample_n(size=10)
+  sample_n(size=100)
 
 # extract monthly timeseries for random locations
 # stored as unnamed list of data frames
@@ -55,10 +63,12 @@ local <- apply(locs, 1, function(loc) {
     mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
     as.data.frame
   return(df.loc)
-})
+}) %>%
+  unname
 
 cat('Saving regional and local timeseries to rda file:', RDA_PATH, '\n')
 maurer <- list(regional=regional,
-               local=local)
+               local=local,
+               grid=grid)
 
 save(maurer, file=RDA_PATH)
