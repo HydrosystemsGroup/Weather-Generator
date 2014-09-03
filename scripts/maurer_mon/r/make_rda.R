@@ -15,9 +15,6 @@ if (!file.exists(DB_PATH)) {
   stop(paste0("Input database does not exist: ", DB_PATH))
 }
 
-# set lat limits
-LAT_LIMITS <- c(40, 90)
-
 # load libraries
 library(dplyr)
 library(lubridate)
@@ -29,28 +26,43 @@ db <- src_sqlite(DB_PATH, create = FALSE)
 
 # extract grid points
 grid <- tbl(db, "grid") %>%
-  filter(LAT>=LAT_LIMITS[1], LAT<=LAT_LIMITS[2]) %>%
   collect %>%
   as.data.frame
+
+# function to compute regional average
+compute.regional <- function(name, lat_limits) {
+  reg.df <- tbl(db, "data") %>%
+    filter(LAT>=lat_limits[1], LAT<lat_limits[2]) %>%
+    group_by(YEAR, MONTH) %>%
+    summarise(PRCP=mean(PRCP),
+              TMAX=mean(TMAX),
+              TMIN=mean(TMIN),
+              WIND=mean(WIND)) %>%
+    collect %>%
+    mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+    as.data.frame
+  reg.grid <- grid %>%
+    filter(LAT>=lat_limits[1], LAT<=lat_limits[2])
+  return(list(name=name,
+              lat_limits=name,
+              data=reg.df,
+              grid=reg.grid))
+}
 
 # compute regional average monthly timeseries
-cat('Computing regional average monthly timeseries\n')
-regional <- tbl(db, "data") %>%
-  filter(LAT>=LAT_LIMITS[1], LAT<=LAT_LIMITS[2]) %>%
-  group_by(YEAR, MONTH) %>%
-  summarise(PRCP=mean(PRCP),
-            TMAX=mean(TMAX),
-            TMIN=mean(TMIN),
-            WIND=mean(WIND)) %>%
-  collect %>%
-  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
-  as.data.frame
+cat('Computing regional average monthly timeseries for lower northeast\n')
+reg.ne.lower <- compute.regional(name='Northeast-Lower', lat_limits=c(40, 43))
 
+cat('Computing regional average monthly timeseries for upper northeast\n')
+reg.ne.upper <- compute.regional(name='Northeast-Upper', lat_limits=c(43, 49))
 
-cat('Extracting monthly timeseries for 100 random locations\n')
+cat('Computing regional average monthly timeseries for all of northeast\n')
+reg.ne <- compute.regional(name='Northeast', lat_limits=c(40, 49))
+
+cat('Extracting monthly timeseries for 100 random locations in northeast\n')
 # choose 100 random locations
 set.seed(1234)
-locs <- select(grid, LAT, LON) %>%
+locs <- select(reg.ne[['grid']], LAT, LON) %>%
   unique %>%
   sample_n(size=100)
 
@@ -66,8 +78,16 @@ local <- apply(locs, 1, function(loc) {
 }) %>%
   unname
 
+local <- tbl(db, "data") %>%
+  filter(LAT>=40) %>%
+  collect %>%
+  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+  as.data.frame
+
 cat('Saving regional and local timeseries to rda file:', RDA_PATH, '\n')
-maurer <- list(regional=regional,
+maurer <- list(regional=list('ne-lower'=reg.ne.lower,
+                             'ne-upper'=reg.ne.upper,
+                             'ne'=reg.ne),
                local=local,
                grid=grid)
 
