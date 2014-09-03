@@ -33,7 +33,8 @@ regional <- tbl(db, "data") %>%
             TMIN=mean(TMIN),
             WIND=mean(WIND)) %>%
   collect %>%
-  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-')))
+  mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+  as.data.frame
 
 
 cat('Extracting monthly timeseries for 10 random locations\n')
@@ -51,7 +52,8 @@ local <- apply(locs, 1, function(loc) {
   df.loc <- tbl(db, "data") %>%
     filter(LAT==loc[['LAT']], LON==loc[['LON']]) %>%
     collect %>%
-    mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-')))
+    mutate(DATE=ymd(paste(YEAR, MONTH, 1, sep='-'))) %>%
+    as.data.frame
   return(df.loc)
 })
 
