@@ -20,5 +20,6 @@ Suggests:
     knitr,
     rmarkdown,
     ggplot2,
+    ggmap,
     tidyr,
     stringr
