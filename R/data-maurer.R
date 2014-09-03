@@ -1,22 +1,21 @@
 #' Maurer meterological dataset
 #'
 #' This dataset contains a subset of the monthly meteorological datasets created
-#' by Maurer et al. (2002). Only locations in the east region with latitudes
+#' by Maurer et al. (2002). Only locations in the northeast region with latitudes
 #' above 40 N are included. This dataset was automatically generated
-#' using the makefile and r scripts located in the \code{/scripts/maurer_mon/}
+#' using the makefile and r scripts located in the \code{/scripts/maurer/}
 #' directory.
 #'
 #' The object \code{maurer} is a two-element list containing
 #'
 #' \itemize{
-#'   \item \code{regional}: data frame of regional average monthly climate timeseries
-#'   \item \code{local}: unnamed list of monthly climate timeseries for 100 random locations within the region
+#'   \item \code{data}: data frame of monthly climate timeseries
 #'   \item \code{grid}: data frame containing the file name, latitude and longitude of the locations used in the regional average
 #' }
 #'
 #' @section Measures:
 #'
-#' Each dataset contains the following variables.
+#' The \code{data} data frame contains the following variables.
 #'
 #' \itemize{
 #'   \item \code{PRCP}: precipitation (mm)

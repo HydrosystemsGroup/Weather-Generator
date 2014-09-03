@@ -22,7 +22,7 @@ library(lubridate)
 library(ggplot2)
 theme_set(theme_bw())
 library(weatherGen)
-data(climate)
+data(maurer)
 
 # set RNG seed for reproducibility
 set.seed(2345)
@@ -30,22 +30,16 @@ set.seed(2345)
 
 # Load Monthly Climate Data
 
-This analysis will use the [gridded climate dataset by Maurer et al, 2002](http://www.engr.scu.edu/~emaurer/gridded_obs/index_gridded_obs.html). The data have already been downloaded and converted to an SQLite database using the makefile in [walkerjeffd/climate-data/maurer](https://github.com/walkerjeffd/climate-data/tree/master/maurer). After following the instructions in this repo, there should be an SQLite database called `maurer/db/maurer_mon.db`, which contains a `grid` table containing the grid points, and a `data` table containing the monthly timeseries for each grid point. See the [vignette](https://github.com/walkerjeffd/climate-data/blob/master/maurer/vignette/maurer-mon.Rmd) for examples on how to use this database.
-
-```{r db grid}
-DB_PATH <- '/Users/jeff/Projects/UMass/climate-data/maurer/db/maurer_mon.db'
-db <- src_sqlite(DB_PATH, create = FALSE)
-
-df.grid <- tbl(db, "grid") %>%
-  collect
-```
+This analysis will use the [gridded climate dataset by Maurer et al, 2002](http://www.engr.scu.edu/~emaurer/gridded_obs/index_gridded_obs.html), which is provided in the `maurer` dataset in this package. This dataset was created using the makefile and R scripts in the `/scripts/maurer_mon` directory of the package.
 
 Here is a map of the climate data grid points.
 
 ```{r map east, warning=FALSE}
+df.grid <- maurer$grid
 library(ggmap)
-map <- get_map(location=c(lon=mean(range(df.grid$LON)), lat=mean(range(df.grid$LAT))),
-               zoom=4, maptype="satellite", color='bw')
+map <- get_map(location=c(lon=mean(range(df.grid$LON)), 
+                          lat=mean(range(df.grid$LAT))),
+               zoom=6, maptype="satellite", color='bw')
 ggmap(map, darken=c(0.25, "white"), extent="device") +
   geom_point(aes(x=LON, y=LAT), data=df.grid, color='red', size=1)
 ```
@@ -53,15 +47,10 @@ ggmap(map, darken=c(0.25, "white"), extent="device") +
 Zoomed into new england. The green points will be used to compute a regional average.
 
 ```{r map new england, warning=FALSE}
-map <- get_map(location=c(lon=-72, lat=42),
-               zoom=7, maptype="satellite", color='bw')
 ggmap(map, darken=c(0.25, "white"), extent="device") +
   geom_point(aes(x=LON, y=LAT, color=SELECT), 
-             data=mutate(df.grid, SELECT=(LAT>=41 & LAT<=43 & LON>=-74 & LON<=-70)), size=2) +
-  geom_vline(aes(xintercept=LON), color='green', linetype=2, 
-             data=data.frame(LON=seq(-74, -70))) +
-  geom_hline(aes(yintercept=LAT), color='green', linetype=2, 
-             data=data.frame(LAT=seq(41, 43))) +
+             data=mutate(df.grid, SELECT=(LAT<=43)), size=1) +
+  geom_hline(yint=43, color='green', linetype=2) +
   scale_color_manual(values=c("TRUE"="green", "FALSE"="red"), guide=FALSE)
 ```
 
@@ -70,10 +59,10 @@ ggmap(map, darken=c(0.25, "white"), extent="device") +
 Using the selected grid points, retrieve the monthly timeseries from the database. Also, compute the variable `TAVG` as the arithmetic mean of `TMIN` and `TMAX`.
 
 ```{r climate load}
-clim.mon <- tbl(db, "data") %>%
-  filter(LAT>=41, LAT<=43, LON>=-74, LON<=-70) %>%
+clim.mon <- maurer$data %>%
+  filter(LAT<=43) %>%
   collect %>%
-  select(-REGION, -WIND) %>%
+  select(-WIND) %>%
   mutate(TAVG=(TMIN+TMAX)/2) %>%
   gather(VAR, VALUE, PRCP, TMIN, TMAX, TAVG)
 summary(clim.mon)
@@ -101,7 +90,7 @@ Compute the regional average monthly value of each climate variable.
 
 ```{r climate reg mon}
 clim.reg.mon <- clim.mon %>%
-  group_by(YEAR, MONTH, VAR) %>%
+  group_by(YEAR, MONTH, DATE, VAR) %>%
   summarise(MEAN=mean(VALUE),
             SD=sd(VALUE))
 summary(clim.reg.mon)
@@ -110,7 +99,7 @@ summary(clim.reg.mon)
 This figure shows the regional average monthly climate timeseries. The shaded region shows mean +/- 1 standard deviation.
 
 ```{r plot clim reg mon}
-mutate(clim.reg.mon, DATE=ymd(paste(YEAR,MONTH,1,sep='-'))) %>%
+clim.reg.mon %>%
   ggplot(aes(DATE, MEAN)) +
   geom_ribbon(aes(ymin=MEAN-SD, ymax=MEAN+SD), fill='grey50') +
   geom_line(color='blue') +
@@ -121,7 +110,7 @@ mutate(clim.reg.mon, DATE=ymd(paste(YEAR,MONTH,1,sep='-'))) %>%
 Compute the regional average annual value of each climate variable.
 
 ```{r climate reg yr}
-clim.reg.yr <-  clim.yr %>%
+clim.reg.yr <- clim.yr %>%
   group_by(VAR, YEAR) %>%
   summarise(MEAN=mean(VALUE),
             SD=sd(VALUE))
@@ -545,7 +534,8 @@ The `weatherGen::gen_mon_arma()` function provides a wrapper around these steps 
 - `$sim.mon`: unnamed list of length `n.iter` with each element containing a data.frame with the generated monthly timeseries for the given location. The columns `YEAR_OBS` and `PRCP_OBS_YEAR` contain the year and corresponding annual precipitation sampled from the monthly timeseries of the location.
 
 ```{r wgen mon arma, warning=FALSE}
-wgen_mon <- weatherGen::gen_month_arma(x.reg.yr=clim.reg.yr, x.loc.mon=clim.loc.mon,
+wgen_mon <- weatherGen::gen_month_arma(x.reg.yr=clim.reg.yr,
+                                       x.loc.mon=clim.loc.mon,
                                        n.iter=50, n.year=nrow(clim.reg.yr))
 str(wgen_mon, max.level=1)
 ```

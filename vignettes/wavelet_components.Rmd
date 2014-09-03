@@ -20,10 +20,10 @@ library(dplyr)
 library(tidyr)
 library(stringr)
 library(lubridate)
+library(forecast)
 library(ggplot2)
 theme_set(theme_bw())
 library(weatherGen)
-library(forecast)
 ```
 
 ```{r load data}
