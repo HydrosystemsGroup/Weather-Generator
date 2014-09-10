@@ -1,4 +1,4 @@
-Package: weatherGen
+Package: weathergen
 Type: Package
 Title: Daily weather generator for performing a climate stress test.
 Version: 0.1

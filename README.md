@@ -1,4 +1,4 @@
-weatherGen Package
+weathergen R Package
 =========================
 
 Jeffrey D. Walker, PhD
@@ -9,12 +9,12 @@ This package is under heavy development and should not be used until its officia
 
 ## Installation
 
-This package must be installed from github using devtools. Note that the vignettes will fail at the moment because they rely on external data.
+This package must be installed from github using devtools.
 
 ```R
 library(devtools)
-install_github('walkerjeffd/r-weathergen', build_vignettes=FALSE)
-library(weatherGen)
+install_github('walkerjeffd/weathergen')
+library(weathergen)
 ```
 
 ## Building
