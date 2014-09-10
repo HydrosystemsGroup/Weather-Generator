@@ -1,6 +1,6 @@
-\name{weatherGen-package}
-\alias{weatherGen-package}
-\alias{weatherGen}
+\name{weathergen-package}
+\alias{weathergen-package}
+\alias{weathergen}
 \docType{package}
 \title{
 Weather Generator
@@ -10,7 +10,7 @@ Daily weather generator for evaluating system vulnerability to climate change.
 }
 \details{
 \tabular{ll}{
-Package: \tab weatherGen\cr
+Package: \tab weathergen\cr
 Type: \tab Package\cr
 Version: \tab 0.1\cr
 Date: \tab 2014-07-23\cr
