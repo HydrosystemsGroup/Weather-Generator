@@ -3,6 +3,7 @@
 export(add_trend_mon)
 export(arima_models)
 export(gen_month_arma)
+export(get_maurer_mon)
 export(mc_arimas)
 export(simulate_arima)
 export(simulate_arimas)
