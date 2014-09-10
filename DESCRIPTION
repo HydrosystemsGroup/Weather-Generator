@@ -15,7 +15,8 @@ Imports:
     biwavelet,
     dplyr (>= 0.2),
     hydromad,
-    forecast
+    forecast,
+    lubridate
 Suggests:
     knitr,
     rmarkdown,
