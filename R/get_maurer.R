@@ -24,11 +24,12 @@ get_maurer_mon <- function(lat, lon) {
 aggregate_maurer_mon <- function(x) {
   require(dplyr)
   x <- dplyr::mutate(x, N_DAY=lubridate::days_in_month(DATE))
-  grp <- dplyr::group_by(x, YEAR, LAT, LON)
+  grp <- dplyr::group_by(x, LAT, LON, YEAR)
   x.yr <- dplyr::summarise(grp,
                            PRCP=sum(PRCP),
                            TMAX=sum(TMAX*N_DAY)/sum(N_DAY),
                            TMIN=sum(TMIN*N_DAY)/sum(N_DAY),
                            WIND=sum(WIND*N_DAY)/sum(N_DAY))
+  x.yr <- dplyr::select(x.yr, YEAR, PRCP, TMAX, TMIN, WIND, LAT, LON)
   return(x.yr)
 }
