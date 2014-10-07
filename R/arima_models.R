@@ -36,7 +36,7 @@ simulate_arima <- function(model, n) {
   # add intercept (mean) to current simulation
   sim <- sim + intercept
 
-  return(coredata(sim))
+  return(zoo::coredata(sim))
 }
 
 #' Run simulations of multiple arima models
@@ -52,7 +52,8 @@ simulate_arima <- function(model, n) {
 #' simulate_arimas(models, n=40)
 simulate_arimas <- function(models, n, components=TRUE) {
   # run simulation on each model and combine into 2-d array
-  sim.components <- lapply(models, simulate_arima, n=n) %>% sapply(cbind)
+  sim.components <- lapply(models, simulate_arima, n=n)
+  sim.components <- sapply(sim.components, cbind)
 
   # compute sum of individual component simulations
   if (ncol(sim.components) > 1) {

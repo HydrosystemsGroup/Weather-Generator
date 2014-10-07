@@ -11,6 +11,7 @@ get_maurer_mon <- function(lat, lon) {
   distances <- sqrt((maurer$grid$LAT-lat)^2 + (maurer$grid$LON-lon)^2)
   pos <- c(maurer$grid[which.min(distances),])
   maurer_ts <- subset(maurer$data, LAT==pos$LAT & LON==pos$LON)
+  maurer_ts <- dplyr::mutate(maurer_ts, TAVG=(TMIN+TMAX)/2)
   return(maurer_ts)
 }
 
@@ -29,7 +30,9 @@ aggregate_maurer_mon <- function(x) {
                            PRCP=sum(PRCP),
                            TMAX=sum(TMAX*N_DAY)/sum(N_DAY),
                            TMIN=sum(TMIN*N_DAY)/sum(N_DAY),
+                           TAVG=sum(TAVG*N_DAY)/sum(N_DAY),
                            WIND=sum(WIND*N_DAY)/sum(N_DAY))
-  x.yr <- dplyr::select(x.yr, YEAR, PRCP, TMAX, TMIN, WIND, LAT, LON)
+  x.yr <- dplyr::ungroup(x.yr)
+  x.yr <- dplyr::select(x.yr, YEAR, PRCP, TMAX, TMIN, TAVG, WIND, LAT, LON)
   return(x.yr)
 }
