@@ -11,7 +11,7 @@ output:
 %\VignetteIndexEntry{Wavelet Analysis}
 -->
 
-This document describes how to perform a wavelet analysis of an annual precipitation timeseries. Three identical analyses are performed using 1) Scott Steinshneider's code, and 2) the `biwavelet` package, and 3) the `weatherGen` package.
+This document describes how to perform a wavelet analysis of an annual precipitation timeseries. Three identical analyses are performed using 1) Scott Steinshneider's code, and 2) the `biwavelet` package, and 3) the `weathergen` package.
 
 ## Load Data
 
@@ -21,7 +21,7 @@ library(tidyr)
 library(lubridate)
 library(ggplot2)
 theme_set(theme_bw())
-library(weatherGen)
+library(weathergen)
 data(climate)
 
 # compute daily averages across sites
@@ -300,9 +300,9 @@ WAVELET_ANALYSIS(CLIMATE_VARIABLE=clim.wyr$PRCP, siglvl=0.90,
                  background_noise="white", plot_flag=TRUE)
 ```
 
-### weatherGen Package
+### weathergen Package
 
-The `weatherGen` package provides a `wavelet_analysis()` function that uses the biwavelet `wt()` and `wt.sig()` functions to provide similar functionality as Scott's `WAVELET_ANALYSIS()` function, but with fewer lines of code. 
+The `weathergen` package provides a `wavelet_analysis()` function that uses the biwavelet `wt()` and `wt.sig()` functions to provide similar functionality as Scott's `WAVELET_ANALYSIS()` function, but with fewer lines of code. 
 
 ```{r wgen}
 wave.wgen <- wavelet_analysis(x=clim.wyr$PRCP, sig.level=0.90, noise.type="white")

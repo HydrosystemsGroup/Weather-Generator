@@ -23,7 +23,7 @@ library(lubridate)
 library(forecast)
 library(ggplot2)
 theme_set(theme_bw())
-library(weatherGen)
+library(weathergen)
 ```
 
 ```{r load data}
@@ -82,7 +82,7 @@ print(signif.periods)
 
 ## Wavelet Reconstruction
 
-### weatherGen Package
+### weathergen Package
 
 Using the wavelet transform information, we can reconstruct each frequency component using the `wavelet_components()` function. The arguments to this function specify which components of the wavelet transform should be combined. For example, if periods 11 and 12 are both significant, they can be combined into a single component as a sum. The arguments are:
 
@@ -339,7 +339,7 @@ comps.scott <- WAVELET_DECOMPOSITION(CLIMATE_VARIABLE=clim.wyr$PRCP,
 Comparing the result of `WAVELET_DECOMPOSITION()` and `wavelet_components()` for the significant components derived above yields identical values.
 
 ```{r compare comps}
-cbind(scott=comps.scott[, 2], weatherGen=comps.combine.wgen$COMPONENT)
+cbind(scott=comps.scott[, 2], weathergen=comps.combine.wgen$COMPONENT)
 ```
 
 # Appendix
