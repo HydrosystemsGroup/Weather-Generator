@@ -6,10 +6,6 @@ output:
   html_document:
     toc: yes
 ---
-<!--
-%\VignetteEngine{knitr::rmarkdown}
-%\VignetteIndexEntry{Annual Precipitation Models}
--->
 
 # Load Data
 
