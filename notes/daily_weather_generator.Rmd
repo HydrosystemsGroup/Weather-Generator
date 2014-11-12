@@ -1,0 +1,987 @@
+---
+title: "Daily Weather Generator"
+author: "Jeffrey D Walker, PhD"
+date: "November 10, 2014"
+output: html_document
+---
+
+```{r libraries}
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+theme_set(theme_bw())
+library(weathergen)
+```
+
+```{r}
+data(climate)
+clim.site.da <- climate
+clim.da <- group_by(climate, DATE) %>%
+  summarise(PRCP=mean(PRCP),
+            TMIN=mean(TMIN),
+            TMAX=mean(TMAX)) %>%
+  filter(wyear(DATE)>=1983) %>% # skip WY 1982 which is missing 4 sites
+  mutate(TEMP=(TMIN+TMAX)/2)
+clim.mon <- group_by(clim.da, DATE=floor_date(DATE, 'month')) %>%
+  summarise(PRCP=sum(PRCP),
+            TMAX=mean(TMAX),
+            TMIN=mean(TMIN),
+            TEMP=mean(TEMP))
+clim.wyr <- group_by(clim.da, WYEAR=wyear(DATE)) %>%
+  summarise(PRCP=sum(PRCP),
+            TMAX=mean(TMAX),
+            TMIN=mean(TMIN),
+            TEMP=mean(TEMP))
+```
+
+Run the annual simulation
+
+```{r}
+wgen_wave <- wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, noise.type='white')
+plot(wgen_wave$gws, wgen_wave$period, type="b",
+     xlab="Global Wavelet Spectrum", ylab="Fourier Period (Years)",
+     log="y", ylim=rev(range(wgen_wave$period)), 
+     xlim=range(c(wgen_wave$gws, wgen_wave$gws.sig$signif)))
+lines(wgen_wave$gws.sig$signif, wgen_wave$period, lty=2, col='red') 
+
+signif.periods.idx <- which(wgen_wave$gws > wgen_wave$gws.sig$signif)
+signif.periods <- wgen_wave$period[signif.periods.idx]
+print(signif.periods)
+
+wgen_wave.comp <- wavelet_components(x=clim.wyr$PRCP, 
+                                     wt=wgen_wave, 
+                                     n.periods=2, 
+                                     sig.periods=signif.periods.idx, 
+                                     n.comp.periods=c(1,3))
+```
+
+```{r}
+library(forecast)
+wgen_models <- arima_models(components=wgen_wave.comp)
+par(mfrow=c(3,1))
+plot(forecast(wgen_models[["NOISE"]], h=nrow(clim.wyr)))
+plot(forecast(wgen_models[["COMPONENT 1"]], h=nrow(clim.wyr)))
+plot(forecast(wgen_models[["COMPONENT 2"]], h=nrow(clim.wyr)))
+par(mfrow=c(1,1))
+```
+
+```{r}
+num_year_sim <- 40
+
+wgen_sim.warm <- simulate_arimas(models=wgen_models, n=num_year_sim)
+plot(wgen_sim.warm$sum, type='l')
+```
+
+```{r}
+mean(wgen_sim.warm$sum)
+mean(clim.wyr$PRCP)
+sd(wgen_sim.warm$sum)
+sd(clim.wyr$PRCP)
+```
+
+```{r load inputs}
+# load('../../r-scott/daily_inputs.Rdata')
+
+k1 <- 1
+num_year_sim <- num_year_sim
+water_yr_change <- TRUE
+PRCP_FINAL_ANNUAL_SIM <- wgen_sim.warm$sum
+ANNUAL_PRCP <- clim.wyr$PRCP
+WATER_YEAR_A <- clim.wyr$WYEAR
+
+DATE_D <- clim.da$DATE
+WATER_YEAR_D <- wyear(DATE_D)
+YEAR_D <- year(DATE_D)
+MONTH_D <- month(DATE_D)
+MONTH_DAY_D <- data.frame(MONTH=MONTH_D, DAY=day(DATE_D))
+month_list <- c(10:12, 1:9)
+water_year_start <- min(WATER_YEAR_A)
+water_year_end <- max(WATER_YEAR_A)
+wet_spell_change <- rep(1, 12)
+dry_spell_change <- rep(1, 12)
+
+# WGEN_output <- DAILY_WEATHER_GENERATOR(k1,num_year_sim,PRCP_FINAL_ANNUAL_SIM,ANNUAL_PRCP,WATER_YEAR_A,WATER_YEAR_D,PRCP,TEMP,TMAX,TMIN,DATE_D,MONTH_D,YEAR_D,MONTH_DAY_D,wet_spell_change,dry_spell_change,month_list,water_year_start,water_year_end)
+# names(WGEN_output) <- c("SIM_DATE","YEAR_SIM","MONTH_SIM","DAY_SIM","SIM_PRCP","SIM_TEMP","SIM_TMAX","SIM_TMIN","Monthly_Ratio_PI_old_PI_new")
+```
+
+
+```{r sim dates}
+START_WYEAR_SIM <- 2001
+END_WYEAR_SIM <- START_WYEAR_SIM + num_year_sim - 1
+DATE_SIM <- seq(as.Date(paste(START_WYEAR_SIM-1,"-10-01",sep="")),
+                as.Date(paste(END_WYEAR_SIM,"-09-30",sep="")),by="day")
+DATE_SIM <- DATE_SIM[!(month(DATE_SIM)==2 & day(DATE_SIM)==29)]
+DAY_SIM <- day(DATE_SIM)
+MONTH_SIM <- month(DATE_SIM)
+YEAR_SIM <- year(DATE_SIM)
+WATER_YEAR_SIM <- wyear(DATE_SIM)
+
+DATE_M_SIM <- floor_date(DATE_SIM, 'month')
+YEAR_M_SIM <- year(DATE_M_SIM)
+MONTH_M_SIM <- month(DATE_M_SIM)
+
+DATE_A_SIM <- subset(DATE_M_SIM, MONTH_M_SIM==month_list[1])
+WATER_YEAR_A_SIM <- wyear(DATE_A_SIM)
+
+SIM_LENGTH <- length(DATE_SIM)
+```
+
+```{r setup arrays}
+p00_final <- array(NA,SIM_LENGTH)
+p01_final <- array(NA,SIM_LENGTH)
+p02_final <- array(NA,SIM_LENGTH)
+p10_final <- array(NA,SIM_LENGTH)
+p11_final <- array(NA,SIM_LENGTH)
+p12_final <- array(NA,SIM_LENGTH)
+p20_final <- array(NA,SIM_LENGTH)
+p21_final <- array(NA,SIM_LENGTH)
+p22_final <- array(NA,SIM_LENGTH)
+OCCURENCES <- array(NA,c(SIM_LENGTH))
+OCCURENCES[1] <- 0
+SIM_PRCP <- array(0,c(SIM_LENGTH))
+SIM_TEMP <- array(25,c(SIM_LENGTH))     
+SIM_TMAX <- array(30,c(SIM_LENGTH))     
+SIM_TMIN <- array(20,c(SIM_LENGTH))
+SIM_DATE <- array(as.Date(paste(sample(WATER_YEAR_A,size=1),month_list[1],"01",sep="-")),
+                  c(SIM_LENGTH))
+
+Ratio_PI_old_PI_new <- array(NA,c(num_year_sim,12))
+
+# jeff's data frame
+sim <- data.frame(DATE=DATE_SIM, MONTH=MONTH_SIM, WYEAR=WATER_YEAR_SIM) %>%
+  mutate(STATE=NA,
+         TRANSITION=NA,
+         PRCP=NA,
+         TEMP=NA,
+         TMIN=NA,
+         TMAX=NA,
+         DATE_SAMPLED=NA)
+sim[1, 'STATE'] <- 0
+sim[1, 'PRCP'] <- 0
+sim[1, 'TEMP'] <- 25
+sim[1, 'TMAX'] <- 30
+sim[1, 'TMIN'] <- 20
+```
+
+```{r rng}
+count <- 1
+set.seed(k1)
+rn_all <- runif(SIM_LENGTH,0,1)
+kk <- max(round(sqrt(length(ANNUAL_PRCP)),0),round(length(ANNUAL_PRCP)*0.5,0))
+```
+
+## Single Year Simulation
+
+```{r}
+y <- 1
+sim_annual_prcp <- PRCP_FINAL_ANNUAL_SIM[y]
+```
+
+For the first simulation year the simulated annual precipitation is `r format(sim_annual_prcp, digits=4)` mm. Using this annual precipitation amount, find the `r kk` nearest-neighbors based on the observed annual precipitation. Perform a weighted sampling (IDW) on these nearest neighbors by randomly choosing 100 years with replacement. 
+
+```{r knn annual}
+KNN_ANNUAL <- function(sim_annual_prcp,ANNUAL_PRCP,WATER_YEAR_A,kk,k1,y) {
+  # returns array of years (length of 100) by weighted sampling of kk nearest neighbors
+  var_order <- 1:length(ANNUAL_PRCP)
+	distance <- sqrt((sim_annual_prcp - ANNUAL_PRCP)^2)
+	ordered_distances <- matrix(cbind(var_order,distance)[order(distance),],ncol=2)
+	K_Distances <- matrix(ordered_distances[1:kk,],ncol=2)
+	PROBS <- (1/row(K_Distances)[,1]) / sum((1/row(K_Distances)[,1]))
+	set.seed(k1*y)
+	selection <- sample(row(K_Distances)[,1],size=100,prob=PROBS,replace=TRUE)
+	FINAL_YEARS <- WATER_YEAR_A[K_Distances[selection,1]]
+}
+
+CUR_YEARS <- KNN_ANNUAL(sim_annual_prcp,ANNUAL_PRCP,WATER_YEAR_A,kk,k1,y)
+CUR_YEARS
+```
+
+This figure shows the annual precipitation for each water year, with the `r kk` nearest neighbors highlighted in red. The horizontal red line is the simulated annual precip for the current year (`r format(sim_annual_prcp, digits=4)` mm). 
+
+```{r}
+data.frame(WYEAR=WATER_YEAR_A, PRCP=ANNUAL_PRCP) %>%
+  ggplot(aes(WYEAR, PRCP, color=WYEAR %in% unique(CUR_YEARS))) +
+  geom_point() +
+  geom_hline(yint=sim_annual_prcp, linetype=2, color='red') +
+  geom_text(aes(label=WYEAR), hjust=-0.1, vjust=0.5, size=4) +
+  scale_color_manual('', values=c('TRUE'='orangered', 'FALSE'='grey50'), guide=FALSE) +
+  labs(x="Water Year", y="Annual Precip (mm/yr)")
+```
+
+From these `r kk` nearest neighbors, the random sample of length 100 years is:
+
+```{r}
+data.frame(INDEX=seq_along(CUR_YEARS), CUR_YEARS=CUR_YEARS) %>%
+  ggplot(aes(INDEX, CUR_YEARS)) +
+  geom_point() 
+```
+
+Using this sequence of 100 years, create a continuous timeseries of the observed daily climate variables.
+
+```{r}
+# create array of row indices for extracting daily climate values
+conditional_selection <- NULL
+for (yy in 1:length(CUR_YEARS)) {
+	conditional_selection <- c(conditional_selection,which(WATER_YEAR_D==CUR_YEARS[yy]))
+}
+
+PRCP_CURRENT <- clim.da$PRCP[conditional_selection]
+TEMP_CURRENT <- clim.da$TEMP[conditional_selection]
+TMAX_CURRENT <- clim.da$TMAX[conditional_selection]
+TMIN_CURRENT <- clim.da$TMIN[conditional_selection]
+DATE_D_CURRENT <- clim.da$DATE[conditional_selection]
+MONTH_D_CURRENT <- month(DATE_D_CURRENT)
+YEAR_D_CURRENT <- year(DATE_D_CURRENT)
+WATER_YEAR_D_CURRENT <- wyear(DATE_D_CURRENT)
+MONTH_DAY_D_CURRENT <- MONTH_DAY_D[conditional_selection,]
+
+# NOTE: This includes leap days
+# PRCP_CURRENT <- PRCP[conditional_selection]
+# TEMP_CURRENT <- TEMP[conditional_selection]
+# TMAX_CURRENT <- TMAX[conditional_selection]
+# TMIN_CURRENT <- TMIN[conditional_selection]
+# DATE_D_CURRENT <- DATE_D[conditional_selection]
+# MONTH_D_CURRENT <- MONTH_D[conditional_selection]
+# YEAR_D_CURRENT <- YEAR_D[conditional_selection]
+# WATER_YEAR_D_CURRENT <- WATER_YEAR_D[conditional_selection]
+# MONTH_DAY_D_CURRENT <- MONTH_DAY_D[conditional_selection,]
+
+# fix problem with DATE_D
+# DATE_D_CURRENT <- (cbind(MONTH_DAY_D_CURRENT, YEAR_D_CURRENT) %>%
+#                      as.data.frame %>%
+#   mutate(DATE=as.Date(paste(YEAR_D_CURRENT+1, MONTH_D, DAY_D, sep='-'))))[['DATE']]
+```
+
+```{r}
+data.frame(INDEX=seq_along(PRCP_CURRENT), DATE=DATE_D_CURRENT, PRCP=PRCP_CURRENT) %>%
+  ggplot(aes(INDEX, PRCP, color=factor(wyear(DATE)))) +
+  geom_point() +
+  labs(x="Simulation Day", y="Daily Precip (mm)") +
+  guides(color=guide_legend(title='Water Year', ncol=2))
+```
+
+## State Thresholds
+
+Using this time series, define the dry/wet state thresholds. There are three states:
+
+- `dry: 0`: precip < 0.3
+- `wet: 1`: 0.3 < precip < 80th ptile by month above dry threshold
+- `extreme: 2`: precip > 80th ptile by month above dry threshold
+
+```{r}
+# get 80th percentile of daily precip > 0.3 for each month
+thresh1 <- .3
+extreme_quantile <- 0.8
+
+# Scott's method
+thresh2 <- array(NA,12)
+for (m in 1:12) {
+	x <- which(MONTH_D_CURRENT==month_list[m] & PRCP_CURRENT>thresh1)
+	thresh2[m] <- quantile(PRCP_CURRENT[x],(extreme_quantile))[[1]]
+}
+
+# Jeff's method
+thresholds <- data.frame(MONTH=ordered(MONTH_D_CURRENT, levels=month_list), 
+                         PRCP=PRCP_CURRENT) %>%
+  filter(PRCP>thresh1) %>%
+  group_by(MONTH) %>%
+  summarise(THRESH_2=quantile(PRCP, extreme_quantile),
+            MAX=max(PRCP)) %>%
+  mutate(THRESH_1=0.3) %>%
+  arrange(MONTH)
+
+# compare Scott's with Jeff's
+cbind(SCOTT=thresh2, JEFF=thresholds$THRESH_2, MONTH=thresholds$MONTH)
+```
+
+```{r plot thresholds, fig.width=6, fig.height=3}
+mutate(thresholds, THRESH_21=THRESH_2-THRESH_1, MAX_2=MAX-THRESH_2) %>%
+  select(-THRESH_2, -MAX) %>%
+  gather(VAR, VALUE, THRESH_1, THRESH_21, MAX_2) %>%
+  ggplot(aes(MONTH, VALUE, fill=VAR)) +
+  geom_bar(stat='identity', position='stack') +
+  scale_fill_discrete('Thresholds', labels=c('THRESH_1'='Dry', 'THRESH_21'='Wet', 'MAX_2'='Extreme')) +
+  labs(x='Month', y='Precipitaion Threshold (mm/day)')
+```
+
+## Current States
+
+Merge the precipitation timeseries with the state thresholds.
+
+```{r}
+current <- data.frame(DATE=DATE_D_CURRENT, 
+                      MONTH=as.numeric(MONTH_D_CURRENT), 
+                      PRCP=PRCP_CURRENT,
+                      TEMP=TEMP_CURRENT,
+                      TMAX=TMAX_CURRENT,
+                      TMIN=TMIN_CURRENT) %>%
+  left_join(select(thresholds, MONTH, THRESH_1, THRESH_2) %>% 
+            mutate(MONTH=as.numeric(as.character(MONTH))))
+```
+
+Determine state for precip and lagged precip, and transition. Note that Scott's method applies the current month threshold to the next month (e.g. if the Date is 6/30, the June threshold is applied to the July 1 precip to determine next state). I'll use this same method for now to maintain consistency.
+
+```{r}
+current <- mutate(current,
+             STATE=ifelse(PRCP<=THRESH_1, 0,
+                          ifelse(PRCP<=THRESH_2, 1, 2)),
+             STATE_NEXT=lead(STATE), # uses correct threshold
+#              STATE_NEXT=ifelse(lead(PRCP)<=THRESH_1, 0,
+#                                ifelse(lead(PRCP)<=THRESH_2, 1, 2)), # uses scott's threshold
+             TRANSITION=ifelse(is.na(STATE_NEXT), NA, paste(STATE, STATE_NEXT, sep='')))
+head(current)
+```
+
+This figure shows the precipitation for the first year with the symbols colored by state. The dashed lines shows the two thresholds for each month.
+
+```{r plot prcp state}
+head(current, 365) %>%
+  ggplot(aes(DATE, PRCP, color=factor(STATE))) +
+  geom_point() +
+  geom_line(aes(y=THRESH_1), color='black', linetype=2) +
+  geom_line(aes(y=THRESH_2), color='black', linetype=2) +
+  scale_color_discrete('State', labels=c('0'='Dry', '1'='Wet', '2'='Extreme')) +
+  labs(x='Date', y='Daily Precip (mm)')
+```
+
+## Transition Matrix
+
+This figure shows the frequency of each transition state by month.
+
+```{r plot transition}
+filter(current, !is.na(TRANSITION)) %>%
+  mutate(MONTH=ordered(MONTH, levels=month_list)) %>%
+  ggplot(aes(MONTH, fill=factor(TRANSITION))) +
+  geom_bar(position='fill') +
+  labs(x="Month", y="Fraction") +
+  scale_fill_discrete('Transition')
+```
+
+```{r get_pi}
+# GET_PI <- function(p00,p01,p02,p10,p11,p12,p20,p21,p22) {
+#   pi0 <- 1
+# 	pi1 <- 1
+# 	pi2 <- 1
+# 	P <- matrix(c(p00,p01,p02,pi0,p10,p11,p12,pi1,p20,p21,p22,pi2),byrow=FALSE,nrow=4)
+# 	P[1,1] <- P[1,1] - 1
+# 	P[2,2] <- P[2,2] - 1
+# 	P[3,3] <- P[3,3] - 1
+# 	B <- c(0,0,0,1)
+# 	PI <- solve(P[c(1,2,4),],B[c(1,2,4)])
+# 	return(PI)  
+# }
+
+# take matrix as input
+GET_PI <- function(m) {
+  P <- rbind(m, rep(1, 3))
+  P[1,1] <- P[1,1] - 1
+  P[2,2] <- P[2,2] - 1
+	P[3,3] <- P[3,3] - 1
+	B <- c(0,0,0,1)
+	PI <- solve(P[c(1,2,4),],B[c(1,2,4)])
+	return(PI)
+}
+```
+
+```{r}
+p_scott <- list()
+
+#Fit transition probabilities for Markov Chain
+PRCP_LAG0 <- PRCP_CURRENT[2:length(PRCP_CURRENT)]     # step t+1
+PRCP_LAG1 <- PRCP_CURRENT[1:(length(PRCP_CURRENT)-1)] # step t
+
+MONTH_LAG0 <- MONTH_D_CURRENT[2:length(PRCP_CURRENT)]
+MONTH_LAG1 <- MONTH_D_CURRENT[1:(length(PRCP_CURRENT)-1)]
+# YEAR_LAG0 <- YEAR_D_CURRENT[2:length(PRCP_CURRENT)]
+# YEAR_LAG1 <- YEAR_D_CURRENT[1:(length(PRCP_CURRENT)-1)]
+
+# for each month of the current year
+#   compute transition frequencies
+#   solve for PI
+#   adjust spell lengths
+for (m in 1:12) {			
+  # daily indices for current month in LAG1
+	x <- which(MONTH_LAG1==month_list[m])
+  # daily indices for simulation month and water year
+	r <- which(MONTH_SIM==month_list[m] & WATER_YEAR_SIM==(y+START_WYEAR_SIM-1))
+	
+#   CUR_PRCP0 <- PRCP_LAG0[x]
+# 	CUR_PRCP1 <- PRCP_LAG1[x]
+	
+  # compute transition probabilities for current month/year
+  p00 <- length(which(PRCP_LAG1[x]<=thresh1 & PRCP_LAG0[x]<=thresh1)) / length(which(PRCP_LAG1[x]<=thresh1))
+  p01 <- length(which(PRCP_LAG1[x]<=thresh1 & PRCP_LAG0[x]>thresh1 & PRCP_LAG0[x]<=thresh2[m])) / length(which(PRCP_LAG1[x]<=thresh1))
+  p02 <- length(which(PRCP_LAG1[x]<=thresh1 & PRCP_LAG0[x]>thresh2[m])) / length(which(PRCP_LAG1[x]<=thresh1))
+  p10 <- length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m] & PRCP_LAG0[x]<=thresh1)) / length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m]))
+  p11 <- length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m] & PRCP_LAG0[x]>thresh1 & PRCP_LAG0[x]<=thresh2[m])) / length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m]))
+  p12 <- length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m] & PRCP_LAG0[x]>thresh2[m])) / length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m]))
+  p20 <- length(which(PRCP_LAG1[x]>thresh2[m] & PRCP_LAG0[x]<=thresh1)) / length(which(PRCP_LAG1[x]>thresh2[m]))
+  p21 <- length(which(PRCP_LAG1[x]>thresh2[m] & PRCP_LAG0[x]>thresh1 & PRCP_LAG0[x]<=thresh2[m])) / length(which(PRCP_LAG1[x]>thresh2[m]))
+  p22 <- length(which(PRCP_LAG1[x]>thresh2[m] & PRCP_LAG0[x]>thresh2[m])) / length(which(PRCP_LAG1[x]>thresh2[m]))
+
+# 	
+#   # compute probability of each individual state
+# 	PI_old <- GET_PI(p00_final[r][1],p01_final[r][1],p02_final[r][1],p10_final[r][1],p11_final[r][1],p12_final[r][1],p20_final[r][1],p21_final[r][1],p22_final[r][1])
+# 	
+# 	#adjustments for dry spells
+# 	p01_new <- (p01_final[r] + p02_final[r])/dry_spell_change[m] - p02_final[r]
+# 	p00_new <- p00_final[r] + (p01_final[r] - p01_new)
+# 	p01_final[r] <- p01_new
+# 	p00_final[r] <- p00_new
+# 	
+# 	#adjustments for wet spells
+# 	p10_new <- (p10_final[r] + p12_final[r])/wet_spell_change[m] - p12_final[r]
+# 	p11_new <- p11_final[r] + (p10_final[r] - p10_new)
+# 	p10_final[r] <- p10_new
+# 	p11_final[r] <- p11_new
+# 	
+  mat <- matrix(c(p00,p01,p02,p10,p11,p12,p20,p21,p22), nrow=3)
+	PI_new <- GET_PI(mat)
+
+  p_scott[[as.character(month_list[m])]] <- mat
+
+  p00_final[r] <- p00
+  p01_final[r] <- p01
+  p02_final[r] <- p02
+  p10_final[r] <- p10
+  p11_final[r] <- p11
+  p12_final[r] <- p12
+  p20_final[r] <- p20
+  p21_final[r] <- p21
+  p22_final[r] <- p22
+# 	Ratio_PI_old_PI_new[y,m] <- sum(PI_old[2:3])/sum(PI_new[2:3])
+# 	if (is.na(Ratio_PI_old_PI_new[y,m])) {
+#     Ratio_PI_old_PI_new[y,m] <- 1
+#   }
+} 
+
+```
+
+```{r}
+p_jeff <- lapply(month_list, function(m) {
+  x <- filter(current, MONTH==m)
+  with(x, prop.table(table(STATE_NEXT, STATE), 2))    
+})
+names(p_jeff) <- as.character(month_list)
+```
+
+No longer match because using correct state transitions
+
+```{r}
+# check that jeff's method is the same as scott's
+lapply(as.character(month_list), function(m) {
+  all(p_scott[[m]]-p_jeff[[m]]==0)
+}) %>% 
+  unlist %>%
+  all(.) %>%
+  stopifnot(.)
+```
+
+## Adjust Dry/Wet Spells
+
+Now, we can adjust the transition matrix using the dry/wet spell changes
+
+```{r}
+adjust_spell <- function(p, dry_change=1, wet_change=1) {
+  pnew <- p
+  
+  # adjust dry spell
+  p01 <- (p['1', '0'] + p['2', '0'])/dry_change - p['2', '0']
+  p00 <- p['0', '0'] + (p['1', '0'] - p01)
+  pnew['1','0'] <- p01
+  pnew['0','0'] <- p00
+  
+  #adjust wet spell
+  p10 <- (p['0', '1'] + p['2', '1'])/wet_change - p['2', '1']
+  p11 <- p['1', '1'] + (p['0', '1'] - p10)
+  pnew['0','1'] <- p10
+  pnew['1','1'] <- p11
+  
+  pnew
+}
+pnew <- adjust_spell(p_jeff[['6']], dry=2, wet=1)
+
+PI <- GET_PI(p_jeff[['6']])
+PInew <- GET_PI(pnew)
+PI
+PInew
+```
+
+## Markov Chain Simulation
+
+For each day of the current year, first generate a markov state
+
+```{r}
+j <- 1
+count <- 2
+
+m <- MONTH_SIM[(count-1)]
+mmm <- which(month_list==m)
+d <- DAY_SIM[(count-1)]
+
+# get the random number
+rn <- rn_all[(count-1)]
+
+next_state <- function(prev_state, p) {
+  pp1 <- p['0', as.character(prev_state)]
+  pp2 <- p['1', as.character(prev_state)] + pp1
+  rn <- runif(1)
+  if (rn < pp1) {
+    next_state <- 0
+  } else if (rn >= pp1 & rn < pp2) {
+    next_state <-1
+  } else {
+    next_state <- 2
+  }
+  next_state
+}
+
+cur_OCCURENCE <- OCCURENCES[(count-1)]
+next_OCCURENCE <- next_state(cur_OCCURENCE, p_jeff[[as.character(m)]])
+OCCURENCES[(count)] <- next_OCCURENCE
+
+sim$STATE[count] <- next_state(sim$STATE[count-1], p_jeff[[as.character(m)]])
+sim$TRANSITION[count-1] <- paste0(sim$STATE[count-1],sim$STATE[count])
+
+
+# # assign probabilities based on previous state
+# if (prev_state==0) {
+# 	pp1 <- p00_final[(count-1)]
+# 	pp2 <- p00_final[(count-1)] + p01_final[(count-1)]
+# }
+# if (OCCURENCES[(count-1)]==1) {
+# 	pp1 <- p10_final[(count-1)]
+# 	pp2 <- p10_final[(count-1)] + p11_final[(count-1)]
+# }
+# if (OCCURENCES[(count-1)]==2) {
+# 	pp1 <- p20_final[(count-1)]
+# 	pp2 <- p20_final[(count-1)] + p21_final[(count-1)]
+# }
+# if(rn < pp1) {
+# 	OCCURENCES[count] <- 0
+# } else if (rn >= pp1 & rn < pp2) {
+# 	OCCURENCES[count] <- 1
+# } else {
+# 	OCCURENCES[count] <- 2
+# }
+```
+
+```{r}
+wday_range <- function(j) {
+  rng <- seq(j-3, j+3)
+  rng <- ifelse(rng<=0, 365+rng, rng)
+  rng <- ifelse(rng>365, rng-365, rng)
+  rng
+}
+
+current <- mutate(current,
+                  JDAY=yday(DATE),
+                  WDAY=JDAY-(273+leap_year(DATE)),
+                  WDAY=ifelse(WDAY<=0, 365+WDAY+leap_year(DATE), WDAY))
+
+current <- mutate(current, SELECTED=(TRANSITION==sim$TRANSITION[count-1] & WDAY %in% wday_range(j)))
+
+current <- filter(current, !is.na(SELECTED))
+
+mutate(current, INDEX=row_number()) %>%
+  arrange(SELECTED) %>%
+  filter(INDEX<=365) %>%
+  ggplot(aes(INDEX, PRCP, color=SELECTED)) +
+    geom_point()
+```
+
+```{r}
+stopifnot(sum(current$SELECTED)>0)
+```
+
+```{r}
+cur_day <- which(MONTH_DAY_D_CURRENT[,1]==m & MONTH_DAY_D_CURRENT[,2]==d)
+cur_day <- c((cur_day-3),(cur_day-2),(cur_day-1),cur_day,(cur_day+1),(cur_day+2),(cur_day+3))
+cur_day <- subset(cur_day,cur_day > 0)
+
+if (length(cur_day_cur_state)==0) {
+	cur_day <- which(MONTH_DAY_D_CURRENT[,1]==m & MONTH_DAY_D_CURRENT[,2]==d)
+	cur_day_final <- array(NA,length(cur_day)*61)
+	cur_day_window <- seq(-30,30)
+	for (cc in 1:61) {
+		cur_day_final[(1 + length(cur_day)*(cc-1)):(length(cur_day) + length(cur_day)*(cc-1))] <- (cur_day+cur_day_window[cc])
+	}
+	cur_day <- subset(cur_day_final,cur_day_final > 0)
+	if (cur_OCCERENCE==0 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh1)}			
+	if (cur_OCCERENCE==0 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+	if (cur_OCCERENCE==0 & next_OCCURENCE==2) {
+    cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])
+  }
+  if (cur_OCCERENCE==1 & next_OCCURENCE==0) {
+    cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)
+  }
+  if (cur_OCCERENCE==1 & next_OCCURENCE==1) {
+    cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])
+  }
+  if (cur_OCCERENCE==1 & next_OCCURENCE==2) {
+    cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])
+  }
+  if (cur_OCCERENCE==2 & next_OCCURENCE==0) {
+    cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)
+  }
+  if (cur_OCCERENCE==2 & next_OCCURENCE==1) {
+    cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])
+  }
+  if (cur_OCCERENCE==2 & next_OCCURENCE==2) {
+    cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])
+  }
+}
+```
+
+## KNN Resampling
+
+```{r}
+# possible_days <- cur_day[cur_day_cur_state]
+PRCP_TODAY <- (filter(current, SELECTED))$PRCP
+TEMP_TODAY <- (filter(current, SELECTED))$TEMP
+PRCP_TOMORROW <- (mutate(current, PRCP=lead(PRCP)) %>% filter(SELECTED))$PRCP
+TEMP_TOMORROW <- (mutate(current, TEMP=lead(TEMP)) %>% filter(SELECTED))$TEMP
+TMAX_TOMORROW <- (mutate(current, TMAX=lead(TMAX)) %>% filter(SELECTED))$TMAX
+TMIN_TOMORROW <- (mutate(current, TMIN=lead(TMIN)) %>% filter(SELECTED))$TMIN
+DATE_TOMORROW <- (mutate(current, DATE=lead(DATE)) %>% filter(SELECTED))$DATE
+
+cur_sim_PRCP <- sim$PRCP[count-1]
+cur_sim_TEMP <- sim$TEMP[count-1]
+    
+
+
+mm <- which(MONTH_D_CURRENT==m)
+mm_p <- which(MONTH_D_CURRENT==m & PRCP_CURRENT>0)
+sd_monthly_TEMP <- sd(TEMP_CURRENT[mm],na.rm=TRUE)
+sd_monthly_PRCP <- sd(PRCP_CURRENT[mm_p],na.rm=TRUE)
+mean_monthly_TEMP <- mean(TEMP_CURRENT[mm],na.rm=TRUE)
+mean_monthly_PRCP <- mean(PRCP_CURRENT[mm_p],na.rm=TRUE)
+```
+
+
+```{r knn}
+KNN <- function(cur_sim_PRCP,cur_sim_TEMP,PRCP_TODAY,TEMP_TODAY,PRCP_TOMORROW,TEMP_TOMORROW,TMAX_TOMORROW,TMIN_TOMORROW,DATE_TOMORROW,k,sd_monthly_PRCP,sd_monthly_TEMP,mean_monthly_PRCP,mean_monthly_TEMP,k1,count) {
+  w_PRCP <- 100/sd_monthly_PRCP
+  w_TEMP <- 10/sd_monthly_TEMP
+	var_order <- 1:length(PRCP_TODAY)
+	distance <- sqrt(w_PRCP*((cur_sim_PRCP-mean_monthly_PRCP) - (PRCP_TODAY-mean_monthly_PRCP))^2 + w_TEMP*((cur_sim_TEMP-mean_monthly_TEMP) - (TEMP_TODAY-mean_monthly_TEMP))^2)
+	ordered_distances <- matrix(cbind(var_order,distance)[order(distance),],ncol=2)
+	K_Distances <- matrix(ordered_distances[1:k,],ncol=2)
+	PROBS <- (1/row(K_Distances)[,1]) / sum((1/row(K_Distances)[,1]))
+	set.seed(k1*count)
+	selection <- sample(row(K_Distances)[,1],size=1,prob=PROBS,replace=TRUE)
+	FINAL_PRCP <- PRCP_TOMORROW[K_Distances[selection,1]]
+	FINAL_TEMP <- TEMP_TOMORROW[K_Distances[selection,1]]
+	FINAL_TMAX <- TMAX_TOMORROW[K_Distances[selection,1]]
+	FINAL_TMIN <- TMIN_TOMORROW[K_Distances[selection,1]]
+	FINAL_DATE <- DATE_TOMORROW[K_Distances[selection,1]]
+	return(c(FINAL_PRCP,FINAL_TEMP,FINAL_TMAX,FINAL_TMIN,FINAL_DATE))
+}
+```
+
+
+
+```{r}
+k <- round(sqrt(length(PRCP_TODAY)))
+RESULT <- KNN(cur_sim_PRCP,cur_sim_TEMP,PRCP_TODAY,TEMP_TODAY,PRCP_TOMORROW,TEMP_TOMORROW,TMAX_TOMORROW,TMIN_TOMORROW,DATE_TOMORROW,k,sd_monthly_PRCP,sd_monthly_TEMP,mean_monthly_PRCP,mean_monthly_TEMP,k1,count)
+
+sim$PRCP[count] <- RESULT[1]
+sim$TEMP[count] <- RESULT[2]
+sim$TMAX[count] <- RESULT[3]
+sim$TMIN[count] <- RESULT[4]
+sim$DATE_SAMPLED[count] <- DATE_D_CURRENT[which(as.numeric(DATE_D_CURRENT)==RESULT[5])][1]
+```
+
+
+
+
+```{r}
+  for (j in 1:365) {
+		count <- count + 1
+		if (count <=SIM_LENGTH) {
+		
+		#MARKOV CHAIN
+			rn <- rn_all[(count-1)] 
+			if (OCCURENCES[(count-1)]==0) {
+				pp1 <- p00_final[(count-1)]
+				pp2 <- p00_final[(count-1)] + p01_final[(count-1)]
+			}
+			if (OCCURENCES[(count-1)]==1) {
+				pp1 <- p10_final[(count-1)]
+				pp2 <- p10_final[(count-1)] + p11_final[(count-1)]
+			}
+			if (OCCURENCES[(count-1)]==2) {
+				pp1 <- p20_final[(count-1)]
+				pp2 <- p20_final[(count-1)] + p21_final[(count-1)]
+			}
+			if(rn < pp1) {
+				OCCURENCES[count] <- 0
+			} else if (rn >= pp1 & rn < pp2) {
+				OCCURENCES[count] <- 1
+			} else {
+				OCCURENCES[count] <- 2
+			}
+
+		#KNN RESAMPLING
+			m <- MONTH_SIM[(count-1)]
+			mmm <- which(month_list==m)
+			d <- DAY_SIM[(count-1)]
+			cur_OCCERENCE <- OCCURENCES[(count-1)]
+			next_OCCURENCE <- OCCURENCES[(count)]
+	
+			cur_day <- which(MONTH_DAY_D_CURRENT[,1]==m & MONTH_DAY_D_CURRENT[,2]==d)
+			cur_day <- c((cur_day-3),(cur_day-2),(cur_day-1),cur_day,(cur_day+1),(cur_day+2),(cur_day+3))
+			cur_day <- subset(cur_day,cur_day > 0)
+			if (cur_OCCERENCE==0 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh1)}			
+			if (cur_OCCERENCE==0 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+			if (cur_OCCERENCE==0 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+			if (cur_OCCERENCE==1 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+			if (cur_OCCERENCE==1 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+			if (cur_OCCERENCE==1 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+			if (cur_OCCERENCE==2 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+			if (cur_OCCERENCE==2 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+			if (cur_OCCERENCE==2 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}		
+
+			if (length(cur_day_cur_state)==0) {
+				cur_day <- which(MONTH_DAY_D_CURRENT[,1]==m & MONTH_DAY_D_CURRENT[,2]==d)
+				cur_day_final <- array(NA,length(cur_day)*61)
+				cur_day_window <- seq(-30,30)
+				for (cc in 1:61) {
+					cur_day_final[(1 + length(cur_day)*(cc-1)):(length(cur_day) + length(cur_day)*(cc-1))] <- (cur_day+cur_day_window[cc])
+				}
+				cur_day <- subset(cur_day_final,cur_day_final > 0)
+				if (cur_OCCERENCE==0 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh1)}			
+				if (cur_OCCERENCE==0 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+				if (cur_OCCERENCE==0 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+				if (cur_OCCERENCE==1 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+				if (cur_OCCERENCE==1 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+				if (cur_OCCERENCE==1 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+				if (cur_OCCERENCE==2 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+				if (cur_OCCERENCE==2 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+				if (cur_OCCERENCE==2 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}				
+			}		
+		
+			
+			possible_days <- cur_day[cur_day_cur_state]
+			PRCP_TODAY <- PRCP_CURRENT[possible_days]
+			TEMP_TODAY <- TEMP_CURRENT[possible_days]
+			PRCP_TOMORROW <- PRCP_CURRENT[possible_days+1]
+			TEMP_TOMORROW <- TEMP_CURRENT[possible_days+1]
+			TMAX_TOMORROW <- TMAX_CURRENT[possible_days+1]
+			TMIN_TOMORROW <- TMIN_CURRENT[possible_days+1]
+			DATE_TOMORROW <- DATE_D_CURRENT[possible_days+1]
+
+			cur_sim_PRCP <- SIM_PRCP[(count-1)]
+			cur_sim_TEMP <- SIM_TEMP[(count-1)]
+					
+			mm <- which(MONTH_D_CURRENT==m)
+			mm_p <- which(MONTH_D_CURRENT==m & PRCP_CURRENT>0)
+			sd_monthly_TEMP <- sd(TEMP_CURRENT[mm],na.rm=TRUE)
+			sd_monthly_PRCP <- sd(PRCP_CURRENT[mm_p],na.rm=TRUE)
+			mean_monthly_TEMP <- mean(TEMP_CURRENT[mm],na.rm=TRUE)
+			mean_monthly_PRCP <- mean(PRCP_CURRENT[mm_p],na.rm=TRUE)
+	
+			k <- round(sqrt(length(possible_days)))
+			RESULT <- KNN(cur_sim_PRCP,cur_sim_TEMP,PRCP_TODAY,TEMP_TODAY,PRCP_TOMORROW,TEMP_TOMORROW,TMAX_TOMORROW,TMIN_TOMORROW,DATE_TOMORROW,k,sd_monthly_PRCP,sd_monthly_TEMP,mean_monthly_PRCP,mean_monthly_TEMP,k1,count)
+
+			SIM_PRCP[count] <- RESULT[1]
+			SIM_TEMP[count] <- RESULT[2]
+			SIM_TMAX[count] <- RESULT[3]
+			SIM_TMIN[count] <- RESULT[4]
+			SIM_DATE[count] <- DATE_D_CURRENT[which(as.numeric(DATE_D_CURRENT)==RESULT[5])][1]
+		}
+	}
+}
+```
+
+
+
+Repeat this for all the years
+
+```{r}
+for (y in 1:num_year_sim) {
+  sim_annual_prcp <- PRCP_FINAL_ANNUAL_SIM[y]
+  
+  # get 100 years of kk nearest neighbors
+	CUR_YEARS <- KNN_ANNUAL(sim_annual_prcp,ANNUAL_PRCP,WATER_YEAR_A,kk,k1,y)
+  
+  # create array of row indices for extracting daily climate values
+	conditional_selection <- NULL
+	for (yy in 1:length(CUR_YEARS)) {
+		conditional_selection <- c(conditional_selection,which(WATER_YEAR_D==CUR_YEARS[yy]))
+	}
+	
+  PRCP_CURRENT <- PRCP[conditional_selection]
+	TEMP_CURRENT <- TEMP[conditional_selection]
+	TMAX_CURRENT <- TMAX[conditional_selection]
+	TMIN_CURRENT <- TMIN[conditional_selection]
+	DATE_D_CURRENT <- DATE_D[conditional_selection]
+	MONTH_D_CURRENT <- MONTH_D[conditional_selection]
+	YEAR_D_CURRENT <- YEAR_D[conditional_selection]
+	MONTH_DAY_D_CURRENT <- MONTH_DAY_D[conditional_selection,]
+	
+  # get 80th percentile of daily precip > 0.3 for each month
+	thresh1 <- .3
+	extreme_quantile <- 0.8
+	thresh2 <- array(NA,12)
+	for (m in 1:12) {
+		x <- which(MONTH_D_CURRENT==month_list[m] & PRCP_CURRENT>thresh1)
+		thresh2[m] <- quantile(PRCP_CURRENT[x],(extreme_quantile))[[1]]
+	}
+
+	#Fit transition probabilities for Markov Chain
+	PRCP_LAG0 <- PRCP_CURRENT[2:length(PRCP_CURRENT)]
+	PRCP_LAG1 <- PRCP_CURRENT[1:(length(PRCP_CURRENT)-1)]
+	MONTH_LAG0 <- MONTH_D_CURRENT[2:length(PRCP_CURRENT)]
+	MONTH_LAG1 <- MONTH_D_CURRENT[1:(length(PRCP_CURRENT)-1)]
+	YEAR_LAG0 <- YEAR_D_CURRENT[2:length(PRCP_CURRENT)]
+	YEAR_LAG1 <- YEAR_D_CURRENT[1:(length(PRCP_CURRENT)-1)]
+  
+  # for each month of the current year
+  #   compute transition frequencies
+  #   solve for PI
+  #   adjust spell lengths
+	for (m in 1:12) {			
+    # daily indices for lag1 of current month
+		x <- which(MONTH_LAG1==month_list[m])
+    # daily indices for current month and water year
+		r <- which(MONTH_SIM==month_list[m] & WATER_YEAR_SIM==(y+START_YEAR_SIM))
+		CUR_PRCP0 <- PRCP_LAG0[x]
+		CUR_PRCP1 <- PRCP_LAG1[x]
+		
+    # compute transition probabilities for current month/year
+    p00_final[r] <- length(which(PRCP_LAG1[x]<=thresh1 & PRCP_LAG0[x]<=thresh1)) / length(which(PRCP_LAG1[x]<=thresh1))
+		p01_final[r] <- length(which(PRCP_LAG1[x]<=thresh1 & PRCP_LAG0[x]>thresh1 & PRCP_LAG0[x]<=thresh2[m])) / length(which(PRCP_LAG1[x]<=thresh1))
+		p02_final[r] <- length(which(PRCP_LAG1[x]<=thresh1 & PRCP_LAG0[x]>thresh2[m])) / length(which(PRCP_LAG1[x]<=thresh1))
+		p10_final[r] <- length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m] & PRCP_LAG0[x]<=thresh1)) / length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m]))
+		p11_final[r] <- length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m] & PRCP_LAG0[x]>thresh1 & PRCP_LAG0[x]<=thresh2[m])) / length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m]))
+		p12_final[r] <- length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m] & PRCP_LAG0[x]>thresh2[m])) / length(which(PRCP_LAG1[x]>thresh1 & PRCP_LAG1[x]<=thresh2[m]))
+		p20_final[r] <- length(which(PRCP_LAG1[x]>thresh2[m] & PRCP_LAG0[x]<=thresh1)) / length(which(PRCP_LAG1[x]>thresh2[m]))
+		p21_final[r] <- length(which(PRCP_LAG1[x]>thresh2[m] & PRCP_LAG0[x]>thresh1 & PRCP_LAG0[x]<=thresh2[m])) / length(which(PRCP_LAG1[x]>thresh2[m]))
+		p22_final[r] <- length(which(PRCP_LAG1[x]>thresh2[m] & PRCP_LAG0[x]>thresh2[m])) / length(which(PRCP_LAG1[x]>thresh2[m]))
+		
+    # compute probability of each individual state
+		PI_old <- GET_PI(p00_final[r][1],p01_final[r][1],p02_final[r][1],p10_final[r][1],p11_final[r][1],p12_final[r][1],p20_final[r][1],p21_final[r][1],p22_final[r][1])
+		
+		#adjustments for dry spells
+		p01_new <- (p01_final[r] + p02_final[r])/dry_spell_change[m] - p02_final[r]
+		p00_new <- p00_final[r] + (p01_final[r] - p01_new)
+		p01_final[r] <- p01_new
+		p00_final[r] <- p00_new
+		
+		#adjustments for wet spells
+		p10_new <- (p10_final[r] + p12_final[r])/wet_spell_change[m] - p12_final[r]
+		p11_new <- p11_final[r] + (p10_final[r] - p10_new)
+		p10_final[r] <- p10_new
+		p11_final[r] <- p11_new
+		
+		PI_new <- GET_PI(p00_final[r][1],p01_final[r][1],p02_final[r][1],p10_final[r][1],p11_final[r][1],p12_final[r][1],p20_final[r][1],p21_final[r][1],p22_final[r][1])
+		Ratio_PI_old_PI_new[y,m] <- sum(PI_old[2:3])/sum(PI_new[2:3])
+		if (is.na(Ratio_PI_old_PI_new[y,m])) {Ratio_PI_old_PI_new[y,m] <- 1}
+	} 
+
+	for (j in 1:365) {
+		count <- count + 1
+		if (count <=SIM_LENGTH) {
+		
+		#MARKOV CHAIN
+			rn <- rn_all[(count-1)] 
+			if (OCCURENCES[(count-1)]==0) {
+				pp1 <- p00_final[(count-1)]
+				pp2 <- p00_final[(count-1)] + p01_final[(count-1)]
+			}
+			if (OCCURENCES[(count-1)]==1) {
+				pp1 <- p10_final[(count-1)]
+				pp2 <- p10_final[(count-1)] + p11_final[(count-1)]
+			}
+			if (OCCURENCES[(count-1)]==2) {
+				pp1 <- p20_final[(count-1)]
+				pp2 <- p20_final[(count-1)] + p21_final[(count-1)]
+			}
+			if(rn < pp1) {
+				OCCURENCES[count] <- 0
+			} else if (rn >= pp1 & rn < pp2) {
+				OCCURENCES[count] <- 1
+			} else {
+				OCCURENCES[count] <- 2
+			}
+
+		#KNN RESAMPLING
+			m <- MONTH_SIM[(count-1)]
+			mmm <- which(month_list==m)
+			d <- DAY_SIM[(count-1)]
+			cur_OCCERENCE <- OCCURENCES[(count-1)]
+			next_OCCURENCE <- OCCURENCES[(count)]
+	
+			cur_day <- which(MONTH_DAY_D_CURRENT[,1]==m & MONTH_DAY_D_CURRENT[,2]==d)
+			cur_day <- c((cur_day-3),(cur_day-2),(cur_day-1),cur_day,(cur_day+1),(cur_day+2),(cur_day+3))
+			cur_day <- subset(cur_day,cur_day > 0)
+			if (cur_OCCERENCE==0 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh1)}			
+			if (cur_OCCERENCE==0 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+			if (cur_OCCERENCE==0 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+			if (cur_OCCERENCE==1 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+			if (cur_OCCERENCE==1 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+			if (cur_OCCERENCE==1 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+			if (cur_OCCERENCE==2 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+			if (cur_OCCERENCE==2 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+			if (cur_OCCERENCE==2 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}		
+
+			if (length(cur_day_cur_state)==0) {
+				cur_day <- which(MONTH_DAY_D_CURRENT[,1]==m & MONTH_DAY_D_CURRENT[,2]==d)
+				cur_day_final <- array(NA,length(cur_day)*61)
+				cur_day_window <- seq(-30,30)
+				for (cc in 1:61) {
+					cur_day_final[(1 + length(cur_day)*(cc-1)):(length(cur_day) + length(cur_day)*(cc-1))] <- (cur_day+cur_day_window[cc])
+				}
+				cur_day <- subset(cur_day_final,cur_day_final > 0)
+				if (cur_OCCERENCE==0 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh1)}			
+				if (cur_OCCERENCE==0 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+				if (cur_OCCERENCE==0 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]<=thresh1 & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+				if (cur_OCCERENCE==1 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+				if (cur_OCCERENCE==1 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+				if (cur_OCCERENCE==1 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh1 & PRCP_CURRENT[cur_day]<=thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}
+				if (cur_OCCERENCE==2 & next_OCCURENCE==0) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]<=thresh1)}
+				if (cur_OCCERENCE==2 & next_OCCURENCE==1) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh1 & PRCP_CURRENT[(cur_day+1)]<=thresh2[mmm])}
+				if (cur_OCCERENCE==2 & next_OCCURENCE==2) {cur_day_cur_state <- which(PRCP_CURRENT[cur_day]>thresh2[mmm] & PRCP_CURRENT[(cur_day+1)]>thresh2[mmm])}				
+			}		
+		
+			
+			possible_days <- cur_day[cur_day_cur_state]
+			PRCP_TODAY <- PRCP_CURRENT[possible_days]
+			TEMP_TODAY <- TEMP_CURRENT[possible_days]
+			PRCP_TOMORROW <- PRCP_CURRENT[possible_days+1]
+			TEMP_TOMORROW <- TEMP_CURRENT[possible_days+1]
+			TMAX_TOMORROW <- TMAX_CURRENT[possible_days+1]
+			TMIN_TOMORROW <- TMIN_CURRENT[possible_days+1]
+			DATE_TOMORROW <- DATE_D_CURRENT[possible_days+1]
+
+			cur_sim_PRCP <- SIM_PRCP[(count-1)]
+			cur_sim_TEMP <- SIM_TEMP[(count-1)]
+					
+			mm <- which(MONTH_D_CURRENT==m)
+			mm_p <- which(MONTH_D_CURRENT==m & PRCP_CURRENT>0)
+			sd_monthly_TEMP <- sd(TEMP_CURRENT[mm],na.rm=TRUE)
+			sd_monthly_PRCP <- sd(PRCP_CURRENT[mm_p],na.rm=TRUE)
+			mean_monthly_TEMP <- mean(TEMP_CURRENT[mm],na.rm=TRUE)
+			mean_monthly_PRCP <- mean(PRCP_CURRENT[mm_p],na.rm=TRUE)
+	
+			k <- round(sqrt(length(possible_days)))
+			RESULT <- KNN(cur_sim_PRCP,cur_sim_TEMP,PRCP_TODAY,TEMP_TODAY,PRCP_TOMORROW,TEMP_TOMORROW,TMAX_TOMORROW,TMIN_TOMORROW,DATE_TOMORROW,k,sd_monthly_PRCP,sd_monthly_TEMP,mean_monthly_PRCP,mean_monthly_TEMP,k1,count)
+
+			SIM_PRCP[count] <- RESULT[1]
+			SIM_TEMP[count] <- RESULT[2]
+			SIM_TMAX[count] <- RESULT[3]
+			SIM_TMIN[count] <- RESULT[4]
+			SIM_DATE[count] <- DATE_D_CURRENT[which(as.numeric(DATE_D_CURRENT)==RESULT[5])][1]
+		}
+	}
+}
+Monthly_Ratio_PI_old_PI_new <- apply(Ratio_PI_old_PI_new,FUN=mean,2)
+```
+
+
+```{r}
+WGEN_output <- list(SIM_DATE,YEAR_SIM,MONTH_SIM,DAY_SIM,SIM_PRCP,SIM_TEMP,SIM_TMAX,SIM_TMIN,Monthly_Ratio_PI_old_PI_new)
+```
+
