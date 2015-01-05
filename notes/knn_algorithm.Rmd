@@ -1,0 +1,164 @@
+---
+title: "KNN Algorithm for Weather Variables"
+author: "Jeffrey D Walker, PhD"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: html_document
+---
+
+# Set Up
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(weathergen)
+
+theme_set(theme_bw())
+```
+
+```{r location}
+latitude <- 42
+longitude <- -72
+start_mon <- 10
+states <- c('d', 'w', 'e')
+```
+
+```{r load-climate-data}
+library(RPostgreSQL)
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "cst")
+
+# get the huc8 of location
+huc8 <- dbGetQuery(con, statement=paste(
+  "SELECT w.huc8",
+  "FROM wbdhu8 w",
+  "WHERE ST_Contains(w.geom, ST_SetSRID(ST_MakePoint(",
+    longitude, ",", latitude,
+  "),4326))",
+  "LIMIT 1"))
+
+# get maurer locations in this huc
+clim.da <- dbGetQuery(con, statement=paste(
+  "SELECT date, prcp, tmax, tmin",
+  "FROM get_daily_upstream_nearest(",
+    latitude, ",", longitude,
+  ")"))
+names(clim.da) <- toupper(names(clim.da))
+clim.da$TEMP <- (clim.da$TMIN+clim.da$TMAX)/2
+
+head(clim.da)
+```
+
+```{r aggregate-climate}
+clim.mon <- group_by(clim.da, DATE=floor_date(DATE, 'month')) %>%
+  summarise(PRCP=sum(PRCP),
+            TMAX=mean(TMAX),
+            TMIN=mean(TMIN),
+            TEMP=mean(TEMP))
+clim.wyr <- group_by(clim.da, WYEAR=wyear(DATE)) %>%
+  summarise(N=n(),
+            PRCP=sum(PRCP),
+            TMAX=mean(TMAX),
+            TMIN=mean(TMIN),
+            TEMP=mean(TEMP))
+
+complete_years <- clim.wyr$WYEAR[which(clim.wyr$N>=365)]
+clim.da <- filter(clim.da, wyear(DATE) %in% complete_years)
+clim.mon <- filter(clim.mon, wyear(DATE) %in% complete_years)
+clim.wyr <- filter(clim.wyr, WYEAR %in% complete_years)
+```
+
+
+```{r plot-monthly-climate}
+gather(clim.mon, VAR, VALUE, PRCP:TEMP) %>%
+ggplot(aes(DATE, VALUE)) +
+  geom_line() +
+  labs(x='', y='') +
+  facet_wrap(~VAR, scales='free_y', ncol=1)
+```
+
+```{r plot-annual-climate}
+gather(clim.wyr, VAR, VALUE, PRCP:TEMP) %>%
+ggplot(aes(WYEAR, VALUE)) +
+  geom_line() +
+  labs(x='', y='') +
+  facet_wrap(~VAR, scales='free_y', ncol=1)
+```
+
+# State Thresholds
+
+```{r}
+clim.da <- mutate(clim.da, 
+                  MONTH=month(DATE),
+                  WDAY=waterday(DATE, start.month=start_mon))
+
+thresh <- plyr::dlply(clim.da, c("MONTH"), function(x) {
+  c(0.3, unname(quantile(x$PRCP, probs=c(0.8))))
+})
+```
+
+```{r}
+clim <- group_by(clim.da, MONTH) %>%
+  mutate(STATE=cut(PRCP, breaks=c(0, thresh[[unique(MONTH)]], Inf), include.lowest=TRUE, right=TRUE, labels=states),
+         STATE=ordered(STATE, levels=states),
+         STATE_PREV=lag(STATE)) %>%
+  ungroup
+```
+
+```{r}
+group_by(clim, MONTH, STATE) %>%
+  summarise(N=n()) %>%
+  ggplot(aes(factor(MONTH), N, fill=STATE)) +
+  geom_bar(position='fill', stat='identity') +
+  labs(x="Month", y="Fraction of Historical Days by State")
+```
+
+# Transition Probabilities
+
+```{r}
+print(fit_mc)
+mats <- fit_mc(clim$STATE, clim$MONTH)
+```
+
+Create data frame of simulation dates
+
+```{r}
+n_year <- 50
+sim <- expand.grid(WDAY=seq(1, 365), WYEAR=seq(1, n_year, by=1)) %>%
+  mutate(DATE=as.Date(paste(2001, start_mon, 1, sep='-')) + days(WDAY) - 1)
+```
+
+Run simulation
+
+```{r}
+print(sim_mc)
+sim$STATE <- sim_mc(months=month(sim$DATE), initial='d', states=states, mats=mats)
+```
+
+Check simulated transitions
+
+```{r}
+mats2 <- fit_mc(sim$STATE, month(sim$DATE))
+lapply(seq(1, 12), function(m) { max(abs(mats[[m]]-mats2[[m]])) }) %>% unlist
+lapply(seq(1, 12), function(m) { all(rownames(mats[[m]])==rownames(mats2[[m]])) }) %>% unlist %>% all
+```
+
+# KNN Sampling
+
+```{r}
+clim_initial <- clim[sample(which(clim$WDAY %in% waterday_range(sim$WDAY[1], n=1) & clim$STATE==sim$STATE[[1]]), size=1), ]
+
+sim <- mutate(sim,
+              PRCP=NA_real_,
+              TMAX=NA_real_,
+              TMIN=NA_real_,
+              TEMP=NA_real_)
+sim[1, c('PRCP', 'TMAX', 'TMIN', 'TEMP')] <- clim_initial[, c('PRCP', 'TMAX', 'TMIN', 'TEMP')]
+
+for (i in 2:nrow(sim)) {
+  
+}
+```
+

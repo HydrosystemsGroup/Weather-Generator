@@ -1,7 +1,7 @@
 ---
 title: "Daily Weather Generator"
 author: "Jeffrey D Walker, PhD"
-date: "November 10, 2014"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output: html_document
 ---
 
@@ -12,35 +12,84 @@ library(dplyr)
 library(lubridate)
 library(tidyr)
 library(ggplot2)
-theme_set(theme_bw())
 library(gridExtra)
 library(weathergen)
+
+theme_set(theme_bw())
 ```
 
-```{r}
-data(climate)
-clim.site.da <- climate
-clim.da <- group_by(climate, DATE) %>%
-  summarise(PRCP=mean(PRCP),
-            TMIN=mean(TMIN),
-            TMAX=mean(TMAX)) %>%
-  filter(wyear(DATE)>=1983) %>% # skip WY 1982 which is missing 4 sites
-  mutate(TEMP=(TMIN+TMAX)/2)
+```{r location}
+latitude <- 42
+longitude <- -72
+```
+
+```{r load-climate-data}
+library(RPostgreSQL)
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "cst")
+
+# get the huc8 of location
+huc8 <- dbGetQuery(con, statement=paste(
+  "SELECT w.huc8",
+  "FROM wbdhu8 w",
+  "WHERE ST_Contains(w.geom, ST_SetSRID(ST_MakePoint(",
+    longitude, ",", latitude,
+  "),4326))",
+  "LIMIT 1"))
+
+# get maurer locations in this huc
+clim.da <- dbGetQuery(con, statement=paste(
+  "SELECT date, prcp, tmax, tmin",
+  "FROM get_daily_upstream_nearest(",
+    latitude, ",", longitude,
+  ")"))
+names(clim.da) <- toupper(names(clim.da))
+clim.da$TEMP <- (clim.da$TMIN+clim.da$TMAX)/2
+
+head(clim.da)
+```
+
+```{r aggregate-climate}
 clim.mon <- group_by(clim.da, DATE=floor_date(DATE, 'month')) %>%
   summarise(PRCP=sum(PRCP),
             TMAX=mean(TMAX),
             TMIN=mean(TMIN),
             TEMP=mean(TEMP))
 clim.wyr <- group_by(clim.da, WYEAR=wyear(DATE)) %>%
-  summarise(PRCP=sum(PRCP),
+  summarise(N=n(),
+            PRCP=sum(PRCP),
             TMAX=mean(TMAX),
             TMIN=mean(TMIN),
             TEMP=mean(TEMP))
+
+complete_years <- clim.wyr$WYEAR[which(clim.wyr$N>=365)]
+clim.da <- filter(clim.da, wyear(DATE) %in% complete_years)
+clim.mon <- filter(clim.mon, wyear(DATE) %in% complete_years)
+clim.wyr <- filter(clim.wyr, WYEAR %in% complete_years)
 ```
+
+
+```{r plot-monthly-climate}
+gather(clim.mon, VAR, VALUE, PRCP:TEMP) %>%
+ggplot(aes(DATE, VALUE)) +
+  geom_line() +
+  labs(x='', y='') +
+  facet_wrap(~VAR, scales='free_y', ncol=1)
+```
+
+```{r plot-annual-climate}
+gather(clim.wyr, VAR, VALUE, PRCP:TEMP) %>%
+ggplot(aes(WYEAR, VALUE)) +
+  geom_line() +
+  labs(x='', y='') +
+  facet_wrap(~VAR, scales='free_y', ncol=1)
+```
+
+----
 
 # Annual Simulation
 
-```{r}
+```{r wavelet-analysis}
 wgen_wave <- wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, noise.type='white')
 plot(wgen_wave$gws, wgen_wave$period, type="b",
      xlab="Global Wavelet Spectrum", ylab="Fourier Period (Years)",
@@ -56,10 +105,10 @@ wgen_wave.comp <- wavelet_components(x=clim.wyr$PRCP,
                                      wt=wgen_wave, 
                                      n.periods=2, 
                                      sig.periods=signif.periods.idx, 
-                                     n.comp.periods=c(1,3))
+                                     n.comp.periods=c(2, 2))
 ```
 
-```{r}
+```{r plot-forecast}
 library(forecast)
 wgen_models <- arima_models(components=wgen_wave.comp)
 par(mfrow=c(3,1))
@@ -69,25 +118,45 @@ plot(forecast(wgen_models[["COMPONENT 2"]], h=nrow(clim.wyr)))
 par(mfrow=c(1,1))
 ```
 
-```{r}
-num_year_sim <- 40
+```{r annual-sim-params}
+NUM_TRIALS <- 1
+num_year_sim <- 20
+water_yr_change <- TRUE
+month_list <- c(10:12, 1:9)
+water_year_start <- min(clim.wyr$WYEAR)
+water_year_end <- max(clim.wyr$WYEAR)
+wind_included <- FALSE
+annual_adjust <- TRUE
+max_adjust <- 0.1
+Markov_Adjust <- TRUE
+transform_data <- FALSE
+```
 
+```{r plot-arima-sim}
 wgen_sim.warm <- simulate_arimas(models=wgen_models, n=num_year_sim)
 plot(wgen_sim.warm$sum, type='l')
 ```
 
-```{r}
+```{r stats-arima-sim}
 mean(wgen_sim.warm$sum)
 mean(clim.wyr$PRCP)
 sd(wgen_sim.warm$sum)
 sd(clim.wyr$PRCP)
 ```
 
-```{r load inputs}
-# load('../../r-scott/daily_inputs.Rdata')
-water_yr_change <- TRUE
-month_list <- c(10:12, 1:9)
+## Adjustment Factors
 
+```{r adjustment-factors}
+factors <- list(
+  wet_spell=rep(1, 12),
+  dry_spell=rep(1, 12),
+  prcp_mean=rep(1, 12),
+  prcp_cv=rep(1, 12),
+  temp_mean=rep(0, 12)
+)
+```
+
+```{r climate-inputs}
 START_WYEAR_SIM <- 2001
 k1 <- 1
 
@@ -107,16 +176,11 @@ clim.mon <- mutate(clim.mon,
                   MONTH=month(DATE),
                   DAY=day(DATE)) %>%
   select(DATE, WYEAR, YEAR, MONTH, DAY, PRCP, TMIN, TMAX, TEMP)
-
-clim.wyr <- clim.wyr
-
-wet_spell_change <- rep(1, 12)
-dry_spell_change <- rep(1, 12)
 ```
 
 # Daily Simulation
 
-```{r}
+```{r setup-daily-sim}
 sim.da <- data.frame(DATE=seq(as.Date(paste(min(sim.wyr$WYEAR)-1, '-10-01', sep='')), 
                            as.Date(paste(max(sim.wyr$WYEAR), '-09-30', sep='')),
                            by='day')) %>%
@@ -141,14 +205,14 @@ sim.da[1, 'TMIN'] <- 20
 
 ## Single Year Simulation
 
-```{r}
+```{r setup-single-year-sim}
 i_wyr <- 1
 kk <- max(round(sqrt(length(clim.wyr$PRCP)),0),round(length(clim.wyr$PRCP)*0.5,0))
 ```
 
 For the first simulation year the simulated annual precipitation is `r format(sim.wyr[i_wyr, 'PRCP'], digits=4)` mm. Using this annual precipitation amount, find the `r kk` nearest-neighbors based on the observed annual precipitation. Perform a weighted sampling (IDW) on these nearest neighbors by randomly choosing 100 years with replacement. 
 
-```{r knn annual}
+```{r knn-annual}
 KNN_ANNUAL <- function(sim_annual_prcp,ANNUAL_PRCP,WATER_YEAR_A,k1,y) {
   # returns array of years (length of 100) by weighted sampling of kk nearest neighbors
   kk <- max(round(sqrt(length(ANNUAL_PRCP)),0),round(length(ANNUAL_PRCP)*0.5,0))
@@ -168,7 +232,7 @@ CUR_YEARS
 
 This figure shows the annual precipitation for each water year, with the `r kk` nearest neighbors highlighted in red. The horizontal red line is the simulated annual precip for the current year (`r format(sim.wyr[i_wyr, 'PRCP'], digits=4)` mm). 
 
-```{r knn water years}
+```{r plot-knn-wyears}
 clim.wyr %>%
   ggplot(aes(WYEAR, PRCP, color=WYEAR %in% unique(CUR_YEARS))) +
   geom_point() +
@@ -180,7 +244,7 @@ clim.wyr %>%
 
 From these `r kk` nearest neighbors, the random sample of length 100 years is:
 
-```{r}
+```{r plot-sample-wyears}
 data.frame(INDEX=seq_along(CUR_YEARS), CUR_YEARS=CUR_YEARS) %>%
   ggplot(aes(INDEX, CUR_YEARS)) +
   geom_point() +
@@ -190,7 +254,7 @@ data.frame(INDEX=seq_along(CUR_YEARS), CUR_YEARS=CUR_YEARS) %>%
 
 Using this sequence of 100 years, create a continuous timeseries of the observed daily climate variables.
 
-```{r current arrays}
+```{r extract-sampled-data}
 conditional_selection <- NULL
 for (yy in 1:length(CUR_YEARS)) {
 	conditional_selection <- c(conditional_selection, which(clim.da$WYEAR==CUR_YEARS[yy]))
@@ -200,7 +264,7 @@ current <- data.frame(DATE=clim.da$DATE[conditional_selection]) %>%
   left_join(clim.da)
 ```
 
-```{r}
+```{r plot-sampled-precip}
 mutate(current, INDEX=row_number()) %>%
   ggplot(aes(INDEX, PRCP, color=factor(WYEAR))) +
   geom_point() +
@@ -218,7 +282,7 @@ Using this time series, define the dry/wet state thresholds. There are three sta
 
 ```{r thresholds}
 # get 80th percentile of daily precip > 0.3 for each month
-thresh1 <- 0.3
+thresh1 <- 0.3*25.4
 thresh2_quantile <- 0.8
 
 # Jeff's method
@@ -232,7 +296,7 @@ thresholds <- mutate(current, MONTH=ordered(MONTH, levels=month_list)) %>%
   select(MONTH, THRESH_1, THRESH_2, THRESH_MAX)
 ```
 
-```{r plot thresholds, fig.width=6, fig.height=3}
+```{r plot-thresholds, fig.width=6, fig.height=3}
 mutate(thresholds, THRESH_21=THRESH_2-THRESH_1, THRESH_MAX2=THRESH_MAX-THRESH_2) %>%
   select(-THRESH_2, -THRESH_MAX) %>%
   gather(VAR, VALUE, THRESH_1, THRESH_21, THRESH_MAX2) %>%
@@ -246,7 +310,7 @@ mutate(thresholds, THRESH_21=THRESH_2-THRESH_1, THRESH_MAX2=THRESH_MAX-THRESH_2)
 
 Merge the precipitation timeseries with the state thresholds, and add julian/water days.
 
-```{r create current}
+```{r merge-current-thresholds}
 current <- current %>%
   left_join(select(thresholds, MONTH, THRESH_1, THRESH_2) %>% 
             mutate(MONTH=as.numeric(as.character(MONTH)))) %>%
@@ -258,7 +322,7 @@ current <- current %>%
 
 Determine state for precip and lagged precip, and transition. Note that Scott's method applies the current month threshold to the next month (e.g. if the Date is 6/30, the June threshold is applied to the July 1 precip to determine next state). I'll use this same method for now to maintain consistency.
 
-```{r}
+```{r state-transition}
 current <- mutate(current,
                   STATE=ifelse(PRCP<=THRESH_1, 0,
                                ifelse(PRCP<=THRESH_2, 1, 2)),
@@ -271,7 +335,7 @@ head(current)
 
 This figure shows the precipitation for the first year with the symbols colored by state. The dashed lines shows the two thresholds for each month.
 
-```{r plot prcp state}
+```{r plot-prcp-state}
 # head(current, 365) %>%
 current %>%
   ggplot(aes(WDAY, PRCP, color=factor(STATE))) +
@@ -282,8 +346,7 @@ current %>%
   labs(x='Julian Day (1=Oct 1)', y='Daily Precip (mm)')
 ```
 
-```{r}
-
+```{r aggregate-current-mon}
 current.mon <- select(current, MONTH, PRCP, TEMP) %>%
   gather(VAR, VALUE, PRCP, TEMP) %>%
   group_by(VAR, MONTH) %>%
@@ -307,7 +370,7 @@ current.mon[["PRCP"]][[1]]
 
 This figure shows the frequency of each transition state by month.
 
-```{r plot transition}
+```{r plot-transition-matrix}
 filter(current, !is.na(TRANSITION)) %>%
   mutate(MONTH=ordered(MONTH, levels=month_list)) %>%
   ggplot(aes(MONTH, fill=factor(TRANSITION))) +
@@ -316,7 +379,7 @@ filter(current, !is.na(TRANSITION)) %>%
   scale_fill_discrete('Transition')
 ```
 
-```{r func get PI}
+```{r get-pi}
 GET_PI <- function(m) {
   P <- rbind(m, rep(1, 3))
   P[1,1] <- P[1,1] - 1
@@ -328,7 +391,7 @@ GET_PI <- function(m) {
 }
 ```
 
-```{r mc p matrix}
+```{r mc-matrix}
 mc_p <- lapply(month_list, function(m) {
   x <- filter(current, MONTH==m)
   with(x, prop.table(table(STATE_NEXT, STATE), 2))    
@@ -336,7 +399,7 @@ mc_p <- lapply(month_list, function(m) {
 names(mc_p) <- as.character(month_list)
 ```
 
-```{r plot mc p, fig.width=10, fig.height=8}
+```{r plot-mc-matrix, fig.width=10, fig.height=8}
 lapply(names(mc_p), function(m) {
   return(data.frame(mc_p[[m]]) %>% mutate(MONTH=m))
 }) %>%
@@ -357,7 +420,7 @@ lapply(names(mc_p), function(m) {
 
 Now, we can adjust the transition matrix using the dry/wet spell changes
 
-```{r func adj spell}
+```{r adjust-spell}
 adjust_spell <- function(p, dry_change=1, wet_change=1) {
   pnew <- p
   
@@ -377,7 +440,7 @@ adjust_spell <- function(p, dry_change=1, wet_change=1) {
 }
 ```
 
-```{r plot dry spell change, fig.width=8, fig.height=4}
+```{r plot-dry-spell-change, fig.width=8, fig.height=4}
 p_june <- mc_p[['6']]
 p_june_new <- adjust_spell(p_june, dry=2, wet=1)
 
@@ -405,7 +468,7 @@ p2 <- data.frame(p_june_new) %>%
 grid.arrange(p1, p2, main="\nChange in Transition Matrix with dry=2", ncol=2)
 ```
 
-```{r plot wet spell change, fig.width=8, fig.height=4}
+```{r plot-wet-spell-change, fig.width=8, fig.height=4}
 p_june <- mc_p[['6']]
 p_june_new <- adjust_spell(p_june, dry=1, wet=1.5)
 
@@ -437,7 +500,7 @@ grid.arrange(p1, p2, main="\nChange in Transition Matrix with wet=1.5", ncol=2)
 
 For each day of the current year, first generate a markov state
 
-```{r func next state}
+```{r next-state}
 set.seed(k1)
 next_state <- function(prev_state, p) {
   # given previous state and transition probability matrix p
@@ -460,34 +523,34 @@ next_state(prev_state=0, p=mc_p[['10']])
 
 ## Simulate All States
 
-```{r sim state}
+```{r sim-state}
 for (i in 2:(nrow(filter(sim.da, WYEAR==min(WYEAR)))+1)) {
   sim.da$STATE[i] <- next_state(sim.da$STATE[i-1], mc_p[[as.character(sim.da$MONTH[i-1])]])
   sim.da$TRANSITION[i-1] <- paste0(sim.da$STATE[i-1], sim.da$STATE[i])
 }
 ```
 
-```{r plot sim state freq}
+```{r plot-sim-state-freq}
 prop.table(table(MONTH=sim.da$MONTH, STATE=sim.da$STATE), 1) %>% 
   data.frame %>% 
   ggplot(aes(MONTH, Freq, fill=STATE)) + 
   geom_bar(stat='identity')
 ```
 
-```{r plot current state freq}
+```{r plot-current-state-freq}
 prop.table(table(MONTH=current$MONTH, STATE=current$STATE), 1) %>% 
   data.frame %>% 
   ggplot(aes(MONTH, Freq, fill=STATE)) + 
   geom_bar(stat='identity')
 ```
 
-```{r plot sim state ts, fig.width=6, fig.height=3}
+```{r plot-sim-state-ts, fig.width=6, fig.height=3}
 filter(sim.da, !is.na(TRANSITION)) %>% 
   ggplot(aes(DATE, STATE)) +
   geom_point()
 ```
 
-```{r sim transition matrix}
+```{r sim-transition-matrix}
 filter(sim.da, !is.na(STATE)) %>% 
   mutate(STATE_NEXT=lead(STATE)) %>%
   select(STATE, STATE_NEXT) %>%
@@ -497,7 +560,7 @@ filter(sim.da, !is.na(STATE)) %>%
 
 ## KNN of Daily Climate
 
-```{r}
+```{r plot-knn-daily}
 wday_range <- function(j, n=7) {
   if (n %% 2 == 1) {
     l <- (n-1)/2
@@ -525,12 +588,12 @@ mutate(current.sel, INDEX=row_number()) %>%
     geom_point()
 ```
 
-```{r}
+```{r check-selected}
 stopifnot(sum(current.sel$SELECTED)>0)
 ```
 ## KNN Resampling
 
-```{r}
+```{r setup-knn-resampling}
 # possible_days <- cur_day[cur_day_cur_state]
 PRCP_TODAY <- (filter(current.sel, SELECTED))$PRCP
 TEMP_TODAY <- (filter(current.sel, SELECTED))$TEMP
@@ -564,7 +627,7 @@ KNN <- function(cur_sim_PRCP,cur_sim_TEMP,PRCP_TODAY,TEMP_TODAY,PRCP_TOMORROW,TE
 }
 ```
 
-```{r}
+```{r sim-knn}
 k <- round(sqrt(length(PRCP_TODAY)))
 RESULT <- KNN(cur_sim_PRCP,cur_sim_TEMP,
               PRCP_TODAY,TEMP_TODAY,
@@ -585,7 +648,7 @@ sim.da$DATE_SAMPLED[i] <- RESULT[5]
 
 Repeat this for all days in the year
 
-```{r}
+```{r sim-year}
 for (i in 2:(nrow(filter(sim.da, WYEAR==min(WYEAR)))+1)) {
   j <- sim.da$WDAY[i]
   
@@ -631,7 +694,7 @@ sim.da$DATE_SAMPLED <- as.Date(sim.da$DATE_SAMPLED)
 
 # Complete Simulation
 
-```{r}
+```{r sim-daily}
 sim.da <- data.frame(DATE=seq(as.Date(paste(min(sim.wyr$WYEAR)-1, '-10-01', sep='')), 
                            as.Date(paste(max(sim.wyr$WYEAR), '-09-30', sep='')),
                            by='day')) %>%
@@ -693,6 +756,14 @@ for (i_wyr in seq_along(sim.wyr$WYEAR)) {
            STATE_NEXT=lead(STATE),
            TRANSITION=ifelse(is.na(STATE_NEXT), NA, paste(STATE, STATE_NEXT, sep='')))
   
+  current.mon <- select(current, MONTH, PRCP, TEMP) %>%
+    gather(VAR, VALUE, PRCP, TEMP) %>%
+    plyr::dlply(c("VAR"), function(x) { 
+      plyr::dlply(x, c("MONTH"), function(x) {
+        c(MEAN=mean(x$VALUE), SD=sd(x$VALUE)) 
+      })
+    })
+  
   for (j in 1:(nrow(filter(sim.da, WYEAR==sim.wyr$WYEAR[i_wyr])))) {
     i <- i+1
     if (i > nrow(sim.da)) {
@@ -750,7 +821,7 @@ for (i_wyr in seq_along(sim.wyr$WYEAR)) {
 sim.da$DATE_SAMPLED <- as.Date(sim.da$DATE_SAMPLED)
 ```
 
-```{r}
+```{r plot-sim-temp}
 p1 <- ggplot(sim.da, aes(WDAY, TEMP)) + 
   geom_line(aes(group=WYEAR), alpha=0.2) +
   stat_summary(fun.y='mean', geom="line", color='cyan') +
@@ -766,7 +837,7 @@ p2 <- mutate(clim.da,
 grid.arrange(p1, p2, ncol=1)
 ```
 
-```{r}
+```{r plot-sim-prcp}
 p1 <- ggplot(sim.da, aes(WDAY, PRCP)) + 
   geom_line(aes(group=WYEAR), alpha=0.2) +
   stat_summary(fun.y='mean', geom="line", color='cyan') +
