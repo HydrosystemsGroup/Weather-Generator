@@ -22,22 +22,12 @@ theme_set(theme_bw())
 latitude <- 42
 longitude <- -72
 start_mon <- 10
-states <- c('d', 'w', 'e')
 ```
 
 ```{r load-climate-data}
 library(RPostgreSQL)
 drv <- dbDriver("PostgreSQL")
 con <- dbConnect(drv, dbname = "cst")
-
-# get the huc8 of location
-huc8 <- dbGetQuery(con, statement=paste(
-  "SELECT w.huc8",
-  "FROM wbdhu8 w",
-  "WHERE ST_Contains(w.geom, ST_SetSRID(ST_MakePoint(",
-    longitude, ",", latitude,
-  "),4326))",
-  "LIMIT 1"))
 
 # get maurer locations in this huc
 clim.da <- dbGetQuery(con, statement=paste(
@@ -70,7 +60,6 @@ clim.mon <- filter(clim.mon, wyear(DATE) %in% complete_years)
 clim.wyr <- filter(clim.wyr, WYEAR %in% complete_years)
 ```
 
-
 ```{r plot-monthly-climate}
 gather(clim.mon, VAR, VALUE, PRCP:TEMP) %>%
 ggplot(aes(DATE, VALUE)) +
@@ -87,9 +76,13 @@ ggplot(aes(WYEAR, VALUE)) +
   facet_wrap(~VAR, scales='free_y', ncol=1)
 ```
 
-# State Thresholds
+# Markov State Thresholds
+
+There are three Markov states: (d)ry, (w)et, and (e)xtremely wet. The threshold between dry and wet is assumed to be 0.3 mm for all months. The threshold between wet and extremely wet is set to the 80th percentile of the historical data by month.
 
 ```{r}
+states <- c('d', 'w', 'e')
+
 clim.da <- mutate(clim.da, 
                   MONTH=month(DATE),
                   WDAY=waterday(DATE, start.month=start_mon))
@@ -99,13 +92,21 @@ thresh <- plyr::dlply(clim.da, c("MONTH"), function(x) {
 })
 ```
 
+Using these thresholds, the Markov state for each day in the historical dataset is assigned. Additional columns for holding the previous (i.e. lag-1) state and values are also added to the dataset.
+
 ```{r}
 clim <- group_by(clim.da, MONTH) %>%
   mutate(STATE=cut(PRCP, breaks=c(0, thresh[[unique(MONTH)]], Inf), include.lowest=TRUE, right=TRUE, labels=states),
          STATE=ordered(STATE, levels=states),
-         STATE_PREV=lag(STATE)) %>%
+         STATE_PREV=lag(STATE),
+         PRCP_PREV=lag(PRCP),
+         TEMP_PREV=lag(TEMP),
+         TMAX_PREV=lag(TMAX),
+         TMIN_PREV=lag(TMIN)) %>%
   ungroup
 ```
+
+This figure shows the fraction of days in each month assigned to each state.
 
 ```{r}
 group_by(clim, MONTH, STATE) %>%
@@ -117,48 +118,178 @@ group_by(clim, MONTH, STATE) %>%
 
 # Transition Probabilities
 
+After the Markov states are assigned, the transition probabilities between states are estimated by month using the maximum likelihood estimator. This process is wrapped in the function `weathergen::fit_mc()`. The result is a list of length 12, where each element is a 2-d transition matrix with the previous state by row, and next state by column. 
+
 ```{r}
 print(fit_mc)
-mats <- fit_mc(clim$STATE, clim$MONTH)
+transitions <- fit_mc(clim$STATE, clim$MONTH)
+print(transitions[[1]])
 ```
 
-Create data frame of simulation dates
+# Daily simulation
+
+Set up a data frame for storing the simulation results. Note that the `SAMPLE_DATE` column stores the historical date that was selected via the KNN algorithm for each simulated timestep.
 
 ```{r}
-n_year <- 50
+n_year <- 10
 sim <- expand.grid(WDAY=seq(1, 365), WYEAR=seq(1, n_year, by=1)) %>%
-  mutate(DATE=as.Date(paste(2001, start_mon, 1, sep='-')) + days(WDAY) - 1)
+  mutate(DATE=as.Date(paste(2001, start_mon, 1, sep='-')) + days(WDAY) - 1,
+         SAMPLE_DATE=NA,
+         MONTH=month(DATE),
+         STATE=NA_character_,
+         PRCP=NA_real_,
+         TEMP=NA_real_,
+         TMIN=NA_real_,
+         TMAX=NA_real_)
 ```
 
-Run simulation
+Assign random start day by selecting a random day from the historical record that is the same day of the year as the first simulation day.
+
+```{r}
+initial_date <- clim[[sample(which(clim$WDAY==sim[[1, 'WDAY']]), size=1), 'DATE']]
+sim[1, 'SAMPLE_DATE'] <- as.Date(initial_date, origin='1970-01-01')
+sim[1, 'STATE'] <- as.character(clim[[which(clim$DATE==initial_date), 'STATE']])
+sim[1, 'PRCP'] <- clim[[which(clim$DATE==initial_date), 'PRCP']]
+sim[1, 'TEMP'] <- clim[[which(clim$DATE==initial_date), 'TEMP']]
+sim[1, 'TMIN'] <- clim[[which(clim$DATE==initial_date), 'TMIN']]
+sim[1, 'TMAX'] <- clim[[which(clim$DATE==initial_date), 'TMAX']]
+```
+
+Run the Markov Chain simulation using the `weathergen::sim_mc()` function, which generates a Markov Chain (or sequence of simulated states) using the monthly transition matrices.
 
 ```{r}
 print(sim_mc)
-sim$STATE <- sim_mc(months=month(sim$DATE), initial='d', states=states, mats=mats)
+sim$STATE <- sim_mc(months=month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transitions=transitions)
 ```
 
-Check simulated transitions
+We can check the simulation by comparing the estimated transition probabilities between the simulated and historical time series.
 
-```{r}
-mats2 <- fit_mc(sim$STATE, month(sim$DATE))
-lapply(seq(1, 12), function(m) { max(abs(mats[[m]]-mats2[[m]])) }) %>% unlist
-lapply(seq(1, 12), function(m) { all(rownames(mats[[m]])==rownames(mats2[[m]])) }) %>% unlist %>% all
+```{r, eval=FALSE}
+transitions2 <- fit_mc(sim$STATE, month(sim$DATE))
+lapply(seq(1, 12), function(m) { max(abs(transitions[[m]]-transitions2[[m]])) }) %>% unlist
+lapply(seq(1, 12), function(m) { all(rownames(transitions[[m]])==rownames(transitions2[[m]])) }) %>% unlist %>% all
 ```
 
 # KNN Sampling
 
+After the states are simulated, use the `weathergen::sim_day()` function to perform the daily simulation of meteorological variables with the k-Nearest Neighbor algorithm.
+
 ```{r}
-clim_initial <- clim[sample(which(clim$WDAY %in% waterday_range(sim$WDAY[1], n=1) & clim$STATE==sim$STATE[[1]]), size=1), ]
+print(sim_day)
+sim <- sim_day(n_year=5, historical=clim, states=states, transitions=transitions)
+```
 
-sim <- mutate(sim,
-              PRCP=NA_real_,
-              TMAX=NA_real_,
-              TMIN=NA_real_,
-              TEMP=NA_real_)
-sim[1, c('PRCP', 'TMAX', 'TMIN', 'TEMP')] <- clim_initial[, c('PRCP', 'TMAX', 'TMIN', 'TEMP')]
+This figure shows the simulated timeseries for each variable.
 
-for (i in 2:nrow(sim)) {
-  
+```{r}
+select(sim, WDAY, WYEAR, DATE, PRCP:TMAX) %>%
+  gather(VAR, VALUE, PRCP:TMAX) %>%
+  mutate(DATE=DATE+years(WYEAR-1)) %>%
+  ggplot(aes(DATE, VALUE)) +
+  geom_line() +
+  facet_wrap(~VAR, scales='free_y')
+```
+
+# wgen Function
+
+Everything above is wrapped within the `weathergen::wgen_historical_day()` function. This function takes as arguments the historical timeseries, number of simulation years, and the start month of the water year.
+
+```{r}
+sim <- wgen_historical_day(clim.da, n_year = length(unique(wyear(clim.da$DATE))), start_mon = 10)
+```
+
+Combine the simulated and historical time series into a single data frame for plotting below.
+
+```{r}
+comp <- rbind(select(sim, WYEAR, DATE, PRCP:TMAX) %>%
+                gather(VAR, VALUE, PRCP:TMAX) %>%
+                mutate(DATE=DATE+years(WYEAR-1-(2001-1949))) %>%
+                select(-WYEAR) %>%
+                mutate(SOURCE='sim'),
+              select(clim.da, DATE, PRCP:TEMP) %>%
+                gather(VAR, VALUE, PRCP:TEMP) %>%
+                mutate(SOURCE='hist'))
+```
+
+This figure shows the historical and simulated timeseries of each variable.
+
+```{r}
+ggplot(comp, aes(DATE, VALUE, color=SOURCE)) +
+  geom_line(alpha=0.5) +
+  facet_wrap(~VAR, scales='free_y') +
+  scale_color_manual('', values=c('hist'='black', 'sim'='orangered'))
+```
+
+This figure shows boxplots of the mean and standard deviation for each month, variable, and dataset (historical/simulated).
+
+```{r}
+mutate(comp, MONTH=month(DATE), WYEAR=wyear(DATE)) %>%
+  group_by(SOURCE, VAR, MONTH, WYEAR) %>%
+  summarise(N=n(),
+            MEAN=mean(VALUE),
+            SD=sd(VALUE)) %>%
+  ungroup %>%
+  gather(STAT, VALUE, MEAN:SD) %>%
+  ggplot(aes(factor(MONTH), VALUE, fill=SOURCE)) +
+  geom_boxplot(position='dodge') +
+  facet_wrap(~VAR) +
+  scale_fill_manual('', values=c('hist'='steelblue', 'sim'='orangered'))
+```
+
+This plot compares the lag-1 autocorrelation coefficient for each month/year between the historical and simulated time series. Note that the temperature variables had higher lag-1 autocorrelations in the historical dataset than in the simulated dataset. This artifact was also reported by Apipattanavis et al. (2007).
+
+```{r}
+lag1 <- function(x) {
+  acf(x, plot=FALSE)$acf[2]
 }
+mutate(comp, MONTH=month(DATE), WYEAR=wyear(DATE)) %>%
+  group_by(SOURCE, VAR, MONTH, WYEAR) %>%
+  summarise(LAG1=lag1(VALUE)) %>%
+  ggplot(aes(factor(MONTH), LAG1, fill=SOURCE)) +
+  geom_boxplot(position='dodge') +
+  facet_wrap(~VAR) +
+  scale_fill_manual('', values=c('hist'='steelblue', 'sim'='orangered'))
+```
+
+# Ensemble Batch
+
+```{r, eval=FALSE}
+library(parallel)
+sim_batch <- mclapply(seq(1, 100), function(i) {
+  sim <- sim_day(n_year=61, historical=clim, states=states, transitions=transitions)
+  sim$TRIAL <- i
+  sim
+}, mc.cores=6L)
+sim_batch <- do.call(rbind, sim_batch)
+```
+
+```{r, eval=FALSE}
+clim_stats <- mutate(clim, YEAR=year(DATE)) %>%
+  select(MONTH, PRCP, TEMP, TMIN, TMAX) %>%
+  gather(VAR, VALUE, PRCP:TMAX) %>%
+  group_by(VAR, MONTH) %>%
+  summarise(MEAN=mean(VALUE),
+            MEDIAN=median(VALUE),
+            SD=sd(VALUE),
+            IQR=diff(quantile(VALUE, probs=c(0.25, 0.75)))) %>%
+  ungroup %>%
+  gather(STAT, VALUE, MEAN:IQR)
+sim_stats <- select(sim_batch, TRIAL, MONTH, WYEAR, PRCP, TEMP, TMIN, TMAX) %>%
+  gather(VAR, VALUE, PRCP:TMAX) %>%
+  group_by(TRIAL, VAR, MONTH) %>%
+  summarise(MEAN=mean(VALUE),
+            MEDIAN=median(VALUE),
+            SD=sd(VALUE),
+            IQR=diff(quantile(VALUE, probs=c(0.25, 0.75)))) %>%
+  ungroup %>%
+  gather(STAT, VALUE, MEAN:IQR)
+```
+
+```{r, eval=FALSE}
+sim_stats %>%
+  ggplot(aes(STAT, VALUE)) +
+  geom_boxplot() +
+  geom_point(data=clim_stats, color='red') +
+  facet_grid(VAR~MONTH)
 ```
 
