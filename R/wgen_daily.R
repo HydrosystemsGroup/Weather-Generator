@@ -17,10 +17,10 @@
 #'
 #' @param n_year number of simulation years
 #' @param historical historical climate dataframe
-#' @param states list of markov states
-#' @param transitions list of monthly transition matrices generated with fit_mc()
+#' @param states character list of markov states
+#' @param transitions list of monthly transition matrices generated with mc_fit()
 #' @export
-sim_day <- function(n_year, historical, states, transitions) {
+sim_mc_knn_day <- function(n_year, historical, states, transitions) {
   historical_stats <- dplyr::select(historical, MONTH, PRCP, TMAX, TMIN, TEMP)
   historical_stats <- tidyr::gather(historical_stats, VAR, VALUE, PRCP:TEMP)
   historical_stats <- plyr::dlply(historical_stats, c("VAR"), function(x) {
@@ -41,7 +41,7 @@ sim_day <- function(n_year, historical, states, transitions) {
   sim[1, 'TMAX'] <- historical[[initial, 'TMAX']]
 
   # run markov chain simulation
-  sim$STATE <- sim_mc(months=lubridate::month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transition=transitions)
+  sim$STATE <- mc_sim(months=lubridate::month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transition=transitions)
 
   for (i in 2:nrow(sim)) {
     m <- sim[i, 'MONTH']
@@ -95,17 +95,6 @@ select_knn_day <- function(wday, state, state_prev, prcp_prev, temp_prev, prcp_s
   current[selection, ]
 }
 
-.prcpThresholds <- function(historical, dry_wet=0.3, wet_extreme_quantile=0.8) {
-  stopifnot('MONTH' %in% names(historical))
-  stopifnot('PRCP' %in% names(historical))
-
-  thresh <- plyr::dlply(historical, c("MONTH"), function(x) {
-    c(dry_wet, unname(quantile(x[['PRCP']], probs=wet_extreme_quantile)))
-  })
-
-  thresh
-}
-
 
 #' Run Daily Weather Generator using Historical Data
 #'
@@ -118,27 +107,25 @@ wgen_historical_day <- function(historical, n_year, start_mon=10) {
   historical <- dplyr::mutate(historical, MONTH=month(DATE), WDAY=waterday(DATE, start.month=start_mon))
 
   # compute precipitation thresholds by month
-  thresh <- .prcpThresholds(historical, dry_wet=0.3, wet_extreme_quantile=0.8)
+  thresh <- mc_state_threshold(historical[['PRCP']], historical[['MONTH']],
+                               dry_wet=0.3, wet_extreme_quantile=0.8)
 
   states <- c('d', 'w', 'e')
 
   # assign precipitation state and lagged variable columns
-  historical <- dplyr::group_by(historical, MONTH)
   historical <- dplyr::mutate(historical,
-    STATE=cut(PRCP, breaks=c(0, thresh[[unique(MONTH)]], Inf), include.lowest=TRUE, right=TRUE, labels=states),
-    STATE=ordered(STATE, levels=states),
+    STATE=mc_assign_states(PRCP, MONTH, states, thresh),
     STATE_PREV=lag(STATE),
     PRCP_PREV=lag(PRCP),
     TEMP_PREV=lag(TEMP),
     TMAX_PREV=lag(TMAX),
     TMIN_PREV=lag(TMIN))
-  historical <- dplyr::ungroup(historical)
 
   # fit Markov Chain transition probabilities
-  transitions <- fit_mc(historical$STATE, historical$MONTH)
+  transitions <- mc_fit(states=historical[['STATE']], months=historical[['MONTH']])
 
   # run daily simulation
-  sim <- sim_day(n_year=n_year, historical=historical, states=states, transitions=transitions)
+  sim <- sim_mc_knn_day(n_year=n_year, historical=historical, states=states, transitions=transitions)
 
   sim
 }

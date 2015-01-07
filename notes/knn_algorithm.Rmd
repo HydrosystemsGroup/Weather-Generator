@@ -22,6 +22,7 @@ theme_set(theme_bw())
 latitude <- 42
 longitude <- -72
 start_mon <- 10
+states <- c('d', 'w', 'e')
 ```
 
 ```{r load-climate-data}
@@ -53,6 +54,9 @@ clim.wyr <- group_by(clim.da, WYEAR=wyear(DATE)) %>%
             TMAX=mean(TMAX),
             TMIN=mean(TMIN),
             TEMP=mean(TEMP))
+clim.da <- mutate(clim.da, 
+                  MONTH=month(DATE),
+                  WDAY=waterday(DATE, start.month=start_mon))
 
 complete_years <- clim.wyr$WYEAR[which(clim.wyr$N>=365)]
 clim.da <- filter(clim.da, wyear(DATE) %in% complete_years)
@@ -78,37 +82,31 @@ ggplot(aes(WYEAR, VALUE)) +
 
 # Markov State Thresholds
 
-There are three Markov states: (d)ry, (w)et, and (e)xtremely wet. The threshold between dry and wet is assumed to be 0.3 mm for all months. The threshold between wet and extremely wet is set to the 80th percentile of the historical data by month.
+There are three Markov states: (d)ry, (w)et, and (e)xtremely wet. The threshold between dry and wet is assumed to be 0.3 mm for all months. The threshold between wet and extremely wet is set to the 80th percentile of the historical data by month. A list of monthly thresholds is generated using the `mc_state_threshold()` function.
 
-```{r}
-states <- c('d', 'w', 'e')
-
-clim.da <- mutate(clim.da, 
-                  MONTH=month(DATE),
-                  WDAY=waterday(DATE, start.month=start_mon))
-
-thresh <- plyr::dlply(clim.da, c("MONTH"), function(x) {
-  c(0.3, unname(quantile(x$PRCP, probs=c(0.8))))
-})
+```{r thresh}
+print(mc_state_threshold)
+thresh <- mc_state_threshold(prcp=clim.da[['PRCP']], months=clim.da[['MONTH']], 
+                             dry_wet=0.3, wet_extreme_quantile=0.8)
+print(thresh[[1]])
 ```
 
 Using these thresholds, the Markov state for each day in the historical dataset is assigned. Additional columns for holding the previous (i.e. lag-1) state and values are also added to the dataset.
 
-```{r}
-clim <- group_by(clim.da, MONTH) %>%
-  mutate(STATE=cut(PRCP, breaks=c(0, thresh[[unique(MONTH)]], Inf), include.lowest=TRUE, right=TRUE, labels=states),
-         STATE=ordered(STATE, levels=states),
-         STATE_PREV=lag(STATE),
-         PRCP_PREV=lag(PRCP),
-         TEMP_PREV=lag(TEMP),
-         TMAX_PREV=lag(TMAX),
-         TMIN_PREV=lag(TMIN)) %>%
-  ungroup
+```{r set-hist-state}
+clim <- mutate(clim.da,
+               STATE=mc_assign_states(PRCP, MONTH, states, thresh),
+               STATE_PREV=lag(STATE),
+               PRCP_PREV=lag(PRCP),
+               TEMP_PREV=lag(TEMP),
+               TMAX_PREV=lag(TMAX),
+               TMIN_PREV=lag(TMIN))
+summary(clim)
 ```
 
 This figure shows the fraction of days in each month assigned to each state.
 
-```{r}
+```{r plot-state-frac}
 group_by(clim, MONTH, STATE) %>%
   summarise(N=n()) %>%
   ggplot(aes(factor(MONTH), N, fill=STATE)) +
@@ -118,19 +116,19 @@ group_by(clim, MONTH, STATE) %>%
 
 # Transition Probabilities
 
-After the Markov states are assigned, the transition probabilities between states are estimated by month using the maximum likelihood estimator. This process is wrapped in the function `weathergen::fit_mc()`. The result is a list of length 12, where each element is a 2-d transition matrix with the previous state by row, and next state by column. 
+After the Markov states are assigned, the transition probabilities between states are estimated by month using the maximum likelihood estimator. This process is wrapped in the function `weathergen::mc_fit()`. The result is a list of length 12, where each element is a 2-d transition matrix with the previous state by row, and next state by column. 
 
-```{r}
-print(fit_mc)
-transitions <- fit_mc(clim$STATE, clim$MONTH)
-print(transitions[[1]])
+```{r fit-transitions}
+print(mc_fit)
+transitions <- mc_fit(clim$STATE, clim$MONTH)
+print(transitions[[1]]) # january
 ```
 
 # Daily simulation
 
 Set up a data frame for storing the simulation results. Note that the `SAMPLE_DATE` column stores the historical date that was selected via the KNN algorithm for each simulated timestep.
 
-```{r}
+```{r create-sim}
 n_year <- 10
 sim <- expand.grid(WDAY=seq(1, 365), WYEAR=seq(1, n_year, by=1)) %>%
   mutate(DATE=as.Date(paste(2001, start_mon, 1, sep='-')) + days(WDAY) - 1,
@@ -145,7 +143,7 @@ sim <- expand.grid(WDAY=seq(1, 365), WYEAR=seq(1, n_year, by=1)) %>%
 
 Assign random start day by selecting a random day from the historical record that is the same day of the year as the first simulation day.
 
-```{r}
+```{r init-sim}
 initial_date <- clim[[sample(which(clim$WDAY==sim[[1, 'WDAY']]), size=1), 'DATE']]
 sim[1, 'SAMPLE_DATE'] <- as.Date(initial_date, origin='1970-01-01')
 sim[1, 'STATE'] <- as.character(clim[[which(clim$DATE==initial_date), 'STATE']])
@@ -155,33 +153,57 @@ sim[1, 'TMIN'] <- clim[[which(clim$DATE==initial_date), 'TMIN']]
 sim[1, 'TMAX'] <- clim[[which(clim$DATE==initial_date), 'TMAX']]
 ```
 
-Run the Markov Chain simulation using the `weathergen::sim_mc()` function, which generates a Markov Chain (or sequence of simulated states) using the monthly transition matrices.
+Run the Markov Chain simulation using the `weathergen::mc_sim()` function, which generates a Markov Chain (or sequence of simulated states) using the monthly transition matrices.
 
-```{r}
-print(sim_mc)
-sim$STATE <- sim_mc(months=month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transitions=transitions)
+```{r assign-state}
+print(mc_sim)
+sim$STATE <- mc_sim(months=month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transitions=transitions)
 ```
 
 We can check the simulation by comparing the estimated transition probabilities between the simulated and historical time series.
 
-```{r, eval=FALSE}
-transitions2 <- fit_mc(sim$STATE, month(sim$DATE))
+```{r check-transitions, eval=FALSE}
+transitions2 <- mc_fit(sim$STATE, month(sim$DATE))
 lapply(seq(1, 12), function(m) { max(abs(transitions[[m]]-transitions2[[m]])) }) %>% unlist
 lapply(seq(1, 12), function(m) { all(rownames(transitions[[m]])==rownames(transitions2[[m]])) }) %>% unlist %>% all
 ```
 
 # KNN Sampling
 
-After the states are simulated, use the `weathergen::sim_day()` function to perform the daily simulation of meteorological variables with the k-Nearest Neighbor algorithm.
+After the states are simulated, use the `weathergen::select_knn_day()` function to perform the daily simulation of meteorological variables with the k-Nearest Neighbor algorithm.
 
-```{r}
-print(sim_day)
-sim <- sim_day(n_year=5, historical=clim, states=states, transitions=transitions)
+```{r run-sim-1}
+historical_stats <- dplyr::select(clim, MONTH, PRCP, TMAX, TMIN, TEMP)
+historical_stats <- tidyr::gather(historical_stats, VAR, VALUE, PRCP:TEMP)
+historical_stats <- plyr::dlply(historical_stats, c("VAR"), function(x) {
+  plyr::dlply(x, c("MONTH"), function(x) {
+    data.frame(MEAN=mean(x$VALUE), SD=sd(x$VALUE))
+  })
+})
+
+for (i in 2:nrow(sim)) {
+  m <- sim[i, 'MONTH']
+  selected <- select_knn_day(wday=sim[[i, 'WDAY']], 
+                             state=sim[[i, 'STATE']], 
+                             state_prev=sim[[i-1, 'STATE']],
+                             prcp_prev=sim[[i-1, 'PRCP']], 
+                             temp_prev=sim[[i-1, 'TEMP']],
+                             prcp_sd=historical_stats[['PRCP']][[m]][['SD']], 
+                             temp_sd=historical_stats[['TEMP']][[m]][['SD']],
+                             historical=clim)
+
+  sim[i, 'SAMPLE_DATE'] <- selected[[1, 'DATE']]
+  sim[i, 'PRCP'] <- selected[[1, 'PRCP']]
+  sim[i, 'TEMP'] <- selected[[1, 'TEMP']]
+  sim[i, 'TMIN'] <- selected[[1, 'TMIN']]
+  sim[i, 'TMAX'] <- selected[[1, 'TMAX']]
+}
+sim$SAMPLE_DATE <- as.Date(sim$SAMPLE_DATE, origin='1970-01-01')
 ```
 
 This figure shows the simulated timeseries for each variable.
 
-```{r}
+```{r sim-ts-1}
 select(sim, WDAY, WYEAR, DATE, PRCP:TMAX) %>%
   gather(VAR, VALUE, PRCP:TMAX) %>%
   mutate(DATE=DATE+years(WYEAR-1)) %>%
@@ -190,17 +212,17 @@ select(sim, WDAY, WYEAR, DATE, PRCP:TMAX) %>%
   facet_wrap(~VAR, scales='free_y')
 ```
 
-# wgen Function
+# wgen Function for Historical Simulation
 
 Everything above is wrapped within the `weathergen::wgen_historical_day()` function. This function takes as arguments the historical timeseries, number of simulation years, and the start month of the water year.
 
-```{r}
+```{r run-sim-2}
 sim <- wgen_historical_day(clim.da, n_year = length(unique(wyear(clim.da$DATE))), start_mon = 10)
 ```
 
 Combine the simulated and historical time series into a single data frame for plotting below.
 
-```{r}
+```{r combine-sim-hist}
 comp <- rbind(select(sim, WYEAR, DATE, PRCP:TMAX) %>%
                 gather(VAR, VALUE, PRCP:TMAX) %>%
                 mutate(DATE=DATE+years(WYEAR-1-(2001-1949))) %>%
@@ -213,16 +235,16 @@ comp <- rbind(select(sim, WYEAR, DATE, PRCP:TMAX) %>%
 
 This figure shows the historical and simulated timeseries of each variable.
 
-```{r}
+```{r plot-ts}
 ggplot(comp, aes(DATE, VALUE, color=SOURCE)) +
   geom_line(alpha=0.5) +
   facet_wrap(~VAR, scales='free_y') +
   scale_color_manual('', values=c('hist'='black', 'sim'='orangered'))
 ```
 
-This figure shows boxplots of the mean and standard deviation for each month, variable, and dataset (historical/simulated).
+This figure shows boxplots of the daily values for each month, variable, and dataset (historical/simulated).
 
-```{r}
+```{r plot-box}
 mutate(comp, MONTH=month(DATE), WYEAR=wyear(DATE)) %>%
   group_by(SOURCE, VAR, MONTH, WYEAR) %>%
   summarise(N=n(),
@@ -238,7 +260,7 @@ mutate(comp, MONTH=month(DATE), WYEAR=wyear(DATE)) %>%
 
 This plot compares the lag-1 autocorrelation coefficient for each month/year between the historical and simulated time series. Note that the temperature variables had higher lag-1 autocorrelations in the historical dataset than in the simulated dataset. This artifact was also reported by Apipattanavis et al. (2007).
 
-```{r}
+```{r plot-lag1}
 lag1 <- function(x) {
   acf(x, plot=FALSE)$acf[2]
 }
@@ -250,6 +272,162 @@ mutate(comp, MONTH=month(DATE), WYEAR=wyear(DATE)) %>%
   facet_wrap(~VAR) +
   scale_fill_manual('', values=c('hist'='steelblue', 'sim'='orangered'))
 ```
+
+This plot shows the distribution of spell lengths for each month based on the historical and simulated datasets.
+
+```{r plot-spell}
+rle_sim <- lapply(seq(1, 12), function(m) {
+  sim_mon <- subset(sim, MONTH==m)
+  rle_sim <- rle(as.character(sim_mon[['STATE']]))
+  rle_sim <- data.frame(N=rle_sim$lengths, STATE=rle_sim$values)
+  rle_sim[['MONTH']] <- m
+  rle_sim
+}) %>%
+  do.call(rbind, .) %>%
+  mutate(STATE=ordered(STATE, levels=states))
+
+rle_hist <- lapply(seq(1, 12), function(m) {
+  clim_mon <- subset(clim, MONTH==m)
+  rle_hist <- rle(as.character(clim_mon[['STATE']]))
+  rle_hist <- data.frame(N=rle_hist$lengths, STATE=rle_hist$values)
+  rle_hist[['MONTH']] <- m
+  rle_hist
+}) %>%
+  do.call(rbind, .) %>%
+  mutate(STATE=ordered(STATE, levels=states))
+
+rle_comp <- rbind(mutate(rle_sim, SOURCE='sim'),
+                  mutate(rle_hist, SOURCE='hist'))
+
+p.d <- filter(rle_comp, STATE=='d') %>%
+  ggplot(aes(N, fill=SOURCE)) + 
+  geom_histogram(binwidth=1, position='dodge') +
+  facet_wrap(~MONTH) +
+  ggtitle("State: Dry") +
+  labs(x='Spell Length') +
+  scale_fill_manual('', values=c('hist'='steelblue', 'sim'='orangered'))
+p.w <- filter(rle_comp, STATE=='w') %>%
+  ggplot(aes(N, fill=SOURCE)) + 
+  geom_histogram(binwidth=1, position='dodge') +
+  facet_wrap(~MONTH) +
+  labs(x='Spell Length') +
+  ggtitle("State: Wet") +
+  scale_fill_manual('', values=c('hist'='steelblue', 'sim'='orangered'))
+p.e <- filter(rle_comp, STATE=='e') %>%
+  ggplot(aes(N, fill=SOURCE)) + 
+  geom_histogram(binwidth=1, position='dodge') +
+  facet_wrap(~MONTH) +
+  labs(x='Spell Length') +
+  ggtitle("State: Extreme Wet") +
+  scale_fill_manual('', values=c('hist'='steelblue', 'sim'='orangered'))
+print(p.d)
+print(p.w)
+print(p.e)
+```
+
+This figure compares the frequency of each markov state by month between the historical, simulated, and theoretical equilibrium (based on the transition matrices).
+
+```{r plot-state-freq, fig.height=6}
+df_equil <- lapply(seq(1, 12), function(m) {
+  equil <- mc_equilibrium(transitions[[m]])
+  df <- data.frame(STATE=names(equil), FREQ=unname(equil))
+  df[['MONTH']] <- m
+  df
+}) %>%
+  do.call(rbind, .) %>%
+  mutate(STATE=ordered(STATE, levels=states))
+
+comp_state <- rbind(select(clim, DATE, MONTH, STATE) %>% mutate(SOURCE="hist"),
+                    select(sim, DATE, MONTH, STATE) %>% mutate(SOURCE="sim"))
+comp_state <- comp_state %>%
+  group_by(SOURCE, MONTH, STATE) %>%
+  summarize(N_STATE=n())
+comp_state <- group_by(comp_state, SOURCE, MONTH) %>%
+  mutate(N_MONTH=sum(N_STATE),
+         FREQ=N_STATE/N_MONTH) %>%
+  select(STATE, FREQ, MONTH)
+comp_state <- rbind(comp_state, mutate(df_equil, SOURCE='equil'))
+
+ggplot(comp_state, aes(MONTH, FREQ, color=SOURCE)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~STATE, scales='free_y', ncol=1) +
+  scale_x_continuous(breaks=seq(1,12)) +
+  scale_fill_manual('', values=c('hist'='steelblue', 'sim'='orangered', 'equil'='darkolivegreen'))
+```
+
+# Adjust Spell Lengths
+
+Create two alternative transition matrices. One where the `dry_spell` factor is set to 1.5, and the other where the `wet_spell` factor is set to 1.5. The plot below shows the differences in equilibrium frequency for each month, state and set of transition matrices.
+
+```{r adjust-spell}
+transitions_drier <- lapply(transitions, function(trans) {
+  mc_adjust_transition(trans, dry_spell = 1.5)
+})
+transitions_wetter <- lapply(transitions, function(trans) {
+  mc_adjust_transition(trans, wet_spell = 1.5)
+})
+
+equil_hist <- lapply(transitions, function(trans) {
+  mc_equilibrium(trans)
+}) %>%
+  do.call(rbind, .) %>%
+  as.data.frame %>%
+  mutate(MONTH=row_number()) %>%
+  gather(STATE, FREQ, d, w, e) %>%
+  mutate(SOURCE='hist')
+equil_drier <- lapply(transitions_drier, function(trans) {
+  mc_equilibrium(trans)
+}) %>%
+  do.call(rbind, .) %>%
+  as.data.frame %>%
+  mutate(MONTH=row_number()) %>%
+  gather(STATE, FREQ, d, w, e) %>%
+  mutate(SOURCE='drier')
+equil_wetter <- lapply(transitions_wetter, function(trans) {
+  mc_equilibrium(trans)
+}) %>%
+  do.call(rbind, .) %>%
+  as.data.frame %>%
+  mutate(MONTH=row_number()) %>%
+  gather(STATE, FREQ, d, w, e) %>%
+  mutate(SOURCE='wetter')
+equil_comp <- rbind(equil_hist, equil_drier, equil_wetter)
+
+ggplot(equil_comp, aes(factor(MONTH), FREQ, color=SOURCE)) +
+  geom_point() +
+  facet_wrap(~STATE, ncol=1, scales='free_y') +
+  labs(x='Month', y='Equilibrium Freq')
+```
+
+```{r sim-wet-dry}
+sim_drier <- sim_mc_knn_day(n_year=length(unique(wyear(clim.da$DATE))), historical=clim, states=states, transitions=transitions_drier)
+sim_wetter <- sim_mc_knn_day(n_year=length(unique(wyear(clim.da$DATE))), historical=clim, states=states, transitions=transitions_wetter)
+```
+
+This figure shows the difference in frequencies of each state, by month, and across the differen datasets.
+
+```{r plot-comp-2}
+comp_state <- rbind(select(clim, DATE, MONTH, STATE) %>% mutate(SOURCE="hist"),
+                    select(sim, DATE, MONTH, STATE) %>% mutate(SOURCE="sim"),
+                    select(sim_drier, DATE, MONTH, STATE) %>% mutate(SOURCE="drier"),
+                    select(sim_wetter, DATE, MONTH, STATE) %>% mutate(SOURCE="wetter"))
+comp_state <- comp_state %>%
+  group_by(SOURCE, MONTH, STATE) %>%
+  summarize(N_STATE=n())
+comp_state <- group_by(comp_state, SOURCE, MONTH) %>%
+  mutate(N_MONTH=sum(N_STATE),
+         FREQ=N_STATE/N_MONTH) %>%
+  select(STATE, FREQ, MONTH)
+comp_state <- rbind(comp_state, mutate(df_equil, SOURCE='equil'))
+
+ggplot(comp_state, aes(MONTH, FREQ, color=SOURCE)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~STATE, scales='free_y', ncol=1) +
+  scale_x_continuous(breaks=seq(1,12))
+```
+
 
 # Ensemble Batch
 
@@ -292,4 +470,3 @@ sim_stats %>%
   geom_point(data=clim_stats, color='red') +
   facet_grid(VAR~MONTH)
 ```
-
