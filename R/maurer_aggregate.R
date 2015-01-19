@@ -1,28 +1,11 @@
-#' Retrieve monthly timeseries for given location from maurer dataset
-#'
-#' @param lat latitude in decimal degrees North
-#' @param lon longitude in decimal degrees East (negative for West)
-#' @export
-#' @examples
-#' get_maurer_mon(42, -71)
-#'
-get_maurer_mon <- function(lat, lon) {
-  data(maurer)
-  distances <- sqrt((maurer$grid$LAT-lat)^2 + (maurer$grid$LON-lon)^2)
-  pos <- c(maurer$grid[which.min(distances),])
-  maurer_ts <- subset(maurer$data, LAT==pos$LAT & LON==pos$LON)
-  maurer_ts <- dplyr::mutate(maurer_ts, TAVG=(TMIN+TMAX)/2)
-  return(maurer_ts)
-}
-
 #' Aggregate monthly timeseries from maurer to annual timesteps
 #'
 #' @param x data frame containing monthly maurer timeseries
 #' @export
 #' @examples
-#' aggregate_maurer_mon(get_maurer_mon(42, -71))
+#' maurer_aggregate(maurer_get_mon(42, -71))
 #'
-aggregate_maurer_mon <- function(x) {
+maurer_aggregate <- function(x) {
   require(dplyr)
   x <- dplyr::mutate(x, N_DAY=lubridate::days_in_month(DATE))
   grp <- dplyr::group_by(x, LAT, LON, YEAR)

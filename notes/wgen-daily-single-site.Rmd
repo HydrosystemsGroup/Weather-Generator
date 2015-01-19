@@ -1,0 +1,144 @@
+---
+title: "Daily Weather Generator for Single Site"
+author: "Jeffrey D Walker, PhD"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: html_document
+---
+
+This document shows how to use the daily weather generator for a single site.
+
+```{r libraries, echo=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(weathergen)
+theme_set(theme_bw())
+
+start_month <- 10
+```
+
+# Load Historical Data
+
+```{r load-obs}
+data(climate_cities)
+obs_day <- climate_cities[['boston']]
+
+obs_day <- obs_day[weathergen::complete_water_years(obs_day$DATE),]
+obs_day['WYEAR'] <- wyear(obs_day[['DATE']], start_month=start_month)
+obs_day['MONTH'] <- month(obs_day[['DATE']])
+obs_day <- obs_day[, c('WYEAR', 'MONTH', 'DATE', 'PRCP', 'TMIN', 'TMAX', 'WIND')]
+
+obs_wyr <- group_by(obs_day, WYEAR) %>%
+  summarise(PRCP=sum(PRCP),
+            TMIN=mean(TMIN),
+            TMAX=mean(TMAX),
+            WIND=mean(WIND))
+
+obs <- list(day=obs_day, wyr=obs_wyr)
+
+summary(obs[['day']])
+```
+
+This figure shows the timeseries of each variable.
+
+```{r plot-obs-da, fig.height=8, fig.width=6, echo=FALSE}
+gather(obs[['day']], VAR, VALUE, PRCP:WIND) %>%
+  ggplot(aes(DATE, VALUE)) +
+  geom_line() +
+  facet_wrap(~VAR, scales='free_y', ncol=1) +
+  labs(x='', y='', title='Historical Daily Weather Data for Boston, MA')
+```
+
+This figure shows the annual sum of precipitation, and means of minimum temperature, maximum temperature, and wind speed by water year. 
+
+```{r plot-obs-wyr, fig.height=8, fig.width=6, echo=FALSE}
+gather(obs[['wyr']], VAR, VALUE, PRCP:WIND) %>%
+  ggplot(aes(WYEAR, VALUE)) +
+    geom_line() +
+    facet_wrap(~VAR, scales='free_y', ncol=1) +
+    labs(x='', y='', title='Historical Annual Weather Data for Boston, MA')
+```
+
+# Historical Simulation
+
+In this section, a daily simulation is performed without any adjustment to the statistics or behavior of the weather variables.
+
+## Simulation Parameters
+
+```{r}
+start_water_year <- 2000 # starting water year for simulation
+n_year <- 40             # number of simulation years
+n_annual_knn <- 100      # population size for annual KNN sampling (default)
+dry_spell_changes <- 1   # change factor for dry spell (0.8 - 1.2?)
+wet_spell_changes <- 1   # change factor for wet spell (0.8 - 1.2?)
+prcp_mean_changes <- 1   # change factor for mean precipitation (0.8 - 1.2?)
+prcp_cv_changes <- 1     # change factor for precipitation coef. of variation (0.8 - 1.2?)
+temp_changes <- 0        # additive factor for temperature variables (-10 - 10)
+```
+
+## Annual Precipitation Simulation
+
+A sequence of annual precipitation values are simulated using the `wgen_annual_arima()` function. This function first fits an ARIMA model to the historical annual precipitation. The ARIMA model is then used to generate a simulation of annual precipitation for length `n_year`. The `wgen_annual_arima()` function returns a list of length 3 containing the ARIMA model object (`model`), the historical annual precipitation (`observed`), and the simulated annual precipitation (`values`). 
+
+```{r}
+sim_annual_prcp <- sim_annual_arima(x = obs[['wyr']][['PRCP']], start_water_year = start_water_year, n_year = n_year)
+str(sim_annual_prcp, max.level=1)
+```
+
+```{r, eval=FALSE}
+# batch simulation to compare mean/sd/skew
+z <- lapply(1:50, function(i) { 
+    sim_annual_arima(x = obs[['wyr']][['PRCP']], start_water_year = start_water_year, n_year = n_year)$sim
+  }) 
+names(z) <- paste0(seq(1, length(z)))
+
+do.call(merge, z) %>% 
+  apply(MARGIN=2, FUN=function(x) { c(mean=mean(x), sd=sd(x), skew=skewness(x))}) %>% 
+  t %>% 
+  as.data.frame %>% 
+  mutate(trial=row_number()) %>% 
+  gather(stat, value, mean:skew) %>% 
+  ggplot(aes(x=stat, value)) + 
+  geom_boxplot() + 
+  geom_point(aes(x=1, y=value), 
+             data=data.frame(stat=c('mean', 'sd', 'skew'), 
+                             value=c(mean(obs[['wyr']][['PRCP']]), sd(obs[['wyr']][['PRCP']]), skewness(obs[['wyr']][['PRCP']]))), 
+             size=4, color='deepskyblue') +
+  facet_wrap(~stat, scales='free')
+```
+
+## Daily Precipitation Simulation
+
+The annual precipitation generated in the previous step is then used to drive a daily simulation. For each year, a k-nearest neighbors algorithm is used to sample `n_annual_knn` years from the historical record with replacement. A Markov Chain model is then fitted to the historical
+
+```{r, eval=FALSE}
+sim_da <- wgen_daily_from_annual(prcp_yr = sim_annual_prcp$sim,
+                                 obs_prcp_yr = zoo(x = obs[['wyr']][['PRCP']], order.by = obs[['wyr']][['WYEAR']]),
+                                 obs_day = zoo(x = obs[['day']][, c('PRCP', 'TMIN', 'TMAX', 'WIND')], order.by = obs[['day']][['DATE']]),
+                                 start_month = start_month,
+                                 n = n_annual_knn)
+```
+
+
+
+```{r, eval=FALSE}
+annual_sum_adjustment <- adjust_daily_to_annual(x_day=sim_da[['PRCP']], years_day=sim_da[['SIM_YEAR']], 
+                                                x_yr=sim_yr$values, years_yr=seq(1, length(sim_yr$values)), 
+                                                min_ratio=0.9, max_ratio=1.1)
+sim_da[, 'PRCP'] <- annual_sum_adjustment$adjusted
+
+# TODO: compute mean_change from transition matrices
+gamma_adjustment <- adjust_daily_gamma(sim_da[['PRCP']], sim_da[['MONTH']], mean_change=prcp_mean_changes, cv_change=prcp_cv_changes)
+sim_da[, 'PRCP'] <- gamma_adjustment$adjusted
+
+tmin_adjustment <- adjust_daily_additive(x = sim_da[['TMIN']], months = sim_da[['MONTH']], changes=temp_changes)
+tmax_adjustment <- adjust_daily_additive(x = sim_da[['TMAX']], months = sim_da[['MONTH']], changes=temp_changes)
+temp_adjustment <- adjust_daily_additive(x = sim_da[['TEMP']], months = sim_da[['MONTH']], changes=temp_changes)
+sim_da[, 'TMIN'] <- tmin_adjustment$adjusted
+sim_da[, 'TMAX'] <- tmax_adjustment$adjusted
+sim_da[, 'TEMP'] <- temp_adjustment$adjusted
+```
+
+

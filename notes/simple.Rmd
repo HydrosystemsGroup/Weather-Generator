@@ -1,0 +1,71 @@
+---
+title: "Simple"
+author: "Jeffrey D Walker, PhD"
+date: "January 8, 2015"
+output: html_document
+---
+
+
+# Load Data
+
+```{r load data, warning=FALSE, message=FALSE}
+library(forecast)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+theme_set(theme_bw())
+library(weathergen)
+data(climate_cities)
+
+obs <- climate_cities[['boston']]
+```
+
+
+```{r}
+start_month <- 10
+n_year <- 5
+n_trial <- 100
+dry_spell_changes <- rep(1, 12)
+wet_spell_changes <- rep(1, 12)
+prcp_mean_changes <- rep(1, 12)
+prcp_cv_changes <- rep(1, 12)
+temp_changes <- rep(0, 12)
+
+obs[, 'WYEAR'] <- wyear(obs[['DATE']], start.month = start_month)
+obs[, 'MONTH'] <- lubridate::month(obs[['DATE']])
+
+obs_wyr <- dplyr::group_by(obs, WYEAR)
+obs_wyr <- dplyr::summarise(obs_wyr,
+                            N=n(),
+                            PRCP=sum(PRCP),
+                            TMIN=mean(TMIN),
+                            TMAX=mean(TMAX),
+                            TEMP=mean(TEMP))
+obs_wyr <- subset(obs_wyr, N>=365)
+obs <- subset(obs, WYEAR %in% unique(obs_wyr$WYEAR))
+
+sim_yr <- wgen_annual_arima(x=obs_wyr$PRCP, n_year=n_year)
+sim_da <- wgen_daily_from_annual(sim_yr_prcp=sim_yr$values,
+                                 obs_yr_prcp=obs_wyr$PRCP,
+                                 obs_yr_years=obs_wyr$WYEAR,
+                                 obs_da=obs,
+                                 obs_da_years=obs$WYEAR,
+                                 n=n_trial)
+
+annual_sum_adjustment <- adjust_daily_to_annual(x_day=sim_da[['PRCP']], years_day=sim_da[['SIM_YEAR']], 
+                                                x_yr=sim_yr$values, years_yr=seq(1, length(sim_yr$values)), 
+                                                min_ratio=0.9, max_ratio=1.1)
+sim_da[, 'PRCP'] <- annual_sum_adjustment$adjusted
+
+# TODO: compute mean_change from transition matrices
+gamma_adjustment <- adjust_daily_gamma(sim_da[['PRCP']], sim_da[['MONTH']], mean_change=prcp_mean_changes, cv_change=prcp_cv_changes)
+sim_da[, 'PRCP'] <- gamma_adjustment$adjusted
+
+tmin_adjustment <- adjust_daily_additive(x = sim_da[['TMIN']], months = sim_da[['MONTH']], changes=temp_changes)
+tmax_adjustment <- adjust_daily_additive(x = sim_da[['TMAX']], months = sim_da[['MONTH']], changes=temp_changes)
+temp_adjustment <- adjust_daily_additive(x = sim_da[['TEMP']], months = sim_da[['MONTH']], changes=temp_changes)
+sim_da[, 'TMIN'] <- tmin_adjustment$adjusted
+sim_da[, 'TMAX'] <- tmax_adjustment$adjusted
+sim_da[, 'TEMP'] <- temp_adjustment$adjusted
+```

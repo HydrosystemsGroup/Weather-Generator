@@ -2,7 +2,9 @@
 title: "KNN Algorithm for Weather Variables"
 author: "Jeffrey D Walker, PhD"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
-output: html_document
+output:
+  html_document:
+    toc: yes
 ---
 
 # Set Up
@@ -16,29 +18,14 @@ library(gridExtra)
 library(weathergen)
 
 theme_set(theme_bw())
-```
 
-```{r location}
-latitude <- 42
-longitude <- -72
 start_mon <- 10
 states <- c('d', 'w', 'e')
 ```
 
 ```{r load-climate-data}
-library(RPostgreSQL)
-drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "cst")
-
-# get maurer locations in this huc
-clim.da <- dbGetQuery(con, statement=paste(
-  "SELECT date, prcp, tmax, tmin",
-  "FROM get_daily_upstream_nearest(",
-    latitude, ",", longitude,
-  ")"))
-names(clim.da) <- toupper(names(clim.da))
-clim.da$TEMP <- (clim.da$TMIN+clim.da$TMAX)/2
-
+data(climate_cities)
+clim.da <- climate_cities[['boston']]
 head(clim.da)
 ```
 

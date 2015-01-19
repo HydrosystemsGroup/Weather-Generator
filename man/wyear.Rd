@@ -4,18 +4,18 @@
 \alias{wyear}
 \title{Get water year component of a date-time}
 \usage{
-wyear(x, start.month = 10)
+wyear(x, start_month = 10)
 }
 \arguments{
 \item{x}{a vector of date-times}
 
-\item{start.month}{initial month of the water year (default is 10 for October)}
+\item{start_month}{initial month of the water year (default is 10 for October)}
 }
 \description{
 Get water year component of a date-time
 }
 \examples{
-wyear(lubridate::ymd("2000-10-01"), start.month=10)
-wyear(lubridate::ymd(c("2000-01-01", "2000-09-30", "2000-10-01", "2000-12-31")), start.month=10)
+wyear(lubridate::ymd("2000-10-01"), start_month=10)
+wyear(lubridate::ymd(c("2000-01-01", "2000-09-30", "2000-10-01", "2000-12-31")), start_month=10)
 }
 

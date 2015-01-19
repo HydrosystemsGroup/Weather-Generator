@@ -5,16 +5,15 @@ date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output: html_document
 ---
 
-# Set Up
+This document shows how to use the daily weather generator for a single site.
 
-```{r libraries}
+```{r libraries, echo=FALSE, message=FALSE}
 library(dplyr)
 library(lubridate)
 library(tidyr)
 library(ggplot2)
 library(gridExtra)
 library(weathergen)
-
 theme_set(theme_bw())
 ```
 

@@ -1,0 +1,282 @@
+---
+title: "Annual Precipitation Model for Single Site"
+author: "Jeffrey D Walker, PhD"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: yes
+---
+
+# Load Data
+
+```{r load data, warning=FALSE, message=FALSE}
+library(forecast)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+theme_set(theme_bw())
+library(weathergen)
+data(climate_cities)
+
+clim.da <- climate_cities[['boston']] %>%
+  mutate(WYEAR=wyear(DATE, start.month=10),
+         MONTH=month(DATE))
+
+# aggregate by water year
+clim.wyr <- clim.da %>%
+  group_by(WYEAR) %>%
+  summarise(N=n(),
+            PRCP=sum(PRCP),
+            TMIN=mean(TMIN),
+            TMAX=mean(TMAX)) %>%
+  filter(N>=365)
+
+# exclude incomplete years
+clim.da <- filter(clim.da, WYEAR %in% clim.wyr$WYEAR)
+```
+
+This figure shows the annual precipitation timeseries.
+
+```{r plot annual data, fig.cap="Annual Timeseries"}
+ggplot(clim.wyr, aes(WYEAR, PRCP)) +
+  geom_line() +
+  labs(x="Water Year", y="Annual Precipitation (mm)")
+```
+
+# Wavelet Analysis
+
+First, perform the wavelet analysis.
+
+```{r wgen wave}
+wgen_wave <- weathergen::wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, 
+                                          noise.type='white')
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(wgen_wave, plot.cb=FALSE, plot.phase=FALSE, plot.sig=TRUE)
+plot(wgen_wave$gws, wgen_wave$period, type="b",
+     xlab="Global Wavelet Spectrum", ylab="Fourier Period (Years)",
+     log="y", ylim=rev(range(wgen_wave$period)), 
+     xlim=range(c(wgen_wave$gws, wgen_wave$gws.sig$signif)))
+lines(wgen_wave$gws.sig$signif, wgen_wave$period, lty=2, col='red')    
+```
+
+Then reconstruct the wavelet components.
+
+```{r}
+wgen_wave.comp <- weathergen::wavelet_components(x=clim.wyr$PRCP, 
+                                                 wt=wgen_wave, 
+                                                 n.periods=1, 
+                                                 sig.periods=c(11,12), 
+                                                 n.comp.periods=2)
+```
+
+## Create ARIMA Models
+
+Now create the arima models.
+
+```{r wgen arima models}
+wgen_models <- weathergen::arima_models(components=wgen_wave.comp)
+```
+
+Here is a plot of the forecasts for each component arima model (top panel is the noise component, bottom panel is the wavelet component).
+
+```{r wgen plot forecast}
+par(mfrow=c(2,1))
+plot(forecast(wgen_models[["NOISE"]], h=nrow(clim.wyr)))
+plot(forecast(wgen_models[["COMPONENT 1"]], h=nrow(clim.wyr)))
+par(mfrow=c(1,1))
+```
+
+## ARIMA Model Simulations
+
+Simulations for each ARIMA models are generated using the `weathergen::simulate.arima()` function.
+
+```{r wgen simulate arima}
+weathergen::simulate_arima(model=wgen_models[['COMPONENT 1']], n=40)
+```
+
+And the `weathergen::simulate.arimas()` function can then be used to simulate a list of arima models containing multiple components (noise and wavelet).
+
+```{r wgen simulate arimas}
+wgen_sim.warm <- weathergen::simulate_arimas(models=wgen_models, n=40)
+wgen_sim.warm
+```
+
+Here is a plot of the resulting simulated annual precipitation timeseries.
+
+```{r wgen plot sim precip}
+plot(wgen_sim.warm$sum, type='l', xlab='Timestep (year)', ylab='Simulated Annual Precip (mm)')
+```
+
+We can then perform a wavelet analysis of the simulated precipitation to compare the GWS of the observed timeseries with that of the simulated timeseries.
+
+```{r wgen wavelet analysis sim precip}
+wgen_wt.sim.warm <- weathergen::wavelet_analysis(wgen_sim.warm$sum, sig.level=0.90,
+                                                 noise.type='white')
+```
+
+Finally, we can use the `weathergen::mc_arima()` function to perform a Monte Carlo simulation by repeating this procedure multiple times.
+
+```{r wgen mc arimas, message=FALSE, warning=FALSE}
+wgen_mc <- weathergen::mc_arimas(models=wgen_models, n=40, n.iter=100)
+str(wgen_mc)
+```
+
+This plot shows the mean across the simulation timeseries, with the shaded region representing the 2.5 and 97.5 percent quantiles.
+
+```{r plot wgen mc x}
+par(mfrow=c(1,1))
+plot(wgen_mc$x.stat[, 'MEAN'], type='n', 
+     xlab="Water Year", ylab="Simulated Precip (mm/yr)",
+     ylim=range(wgen_mc$x.stat))
+polygon(c(seq(1, nrow(wgen_mc$x.stat)),
+          rev(seq(1, nrow(wgen_mc$x.stat)))),
+        c(wgen_mc$x.stat[, 'Q025'],
+          rev(wgen_mc$x.stat[, 'Q975'])),col="grey")
+lines(wgen_mc$x.stat[, 'MEAN'], col='red')
+```
+
+This figure shows each individual simulated timeseries (the red line is the overall mean).
+
+```{r plot wgen mc x ggplot}
+as.data.frame(wgen_mc$x) %>% 
+  mutate(YEAR=seq(1:nrow(wgen_mc$x))) %>%
+  gather(TRIAL, VALUE, -YEAR) %>% 
+  ggplot(aes(YEAR, VALUE)) +
+  geom_line(aes(group=TRIAL), alpha=0.1) +
+  stat_summary(fun.y=mean, geom='line', color='red') +
+  labs(x='Year', y="Simulated Annual Precip (mm/yr)")
+```
+
+This figure summarises the spectrum power for each period. The GWS power for the historical data is the black line, the mean GWS power for the simulated trials of the arima models is the blue line, and the significance threshold is the red line. The shaded area is the 2.5-97.5% confidence interval of the simulated GWS power. 
+
+```{r wgen plot mc summary, fig.height=4}
+plot_gws_power(wgen_wave=wgen_wave, wgen_mc=wgen_mc)
+```
+
+This figure compares the mean, standard deviation and skew of the simulated trials (black point is mean) and the observed (red point) annual timeseries.
+
+```{r}
+plot_wgen_mc_stats(obs=clim.wyr$PRCP, wgen_mc=wgen_mc)
+```
+
+# Annual k-Nearest Neighbors
+
+```{r knn-year-function}
+print(select_knn_year)
+sim_years <- select_knn_year(sim_prcp=wgen_mc$x[1, 1], obs_prcp=clim.wyr$PRCP, obs_years=clim.wyr$WYEAR, n=100)
+```
+
+```{r plot-knn-year}
+clim.wyr %>%
+  ggplot(aes(WYEAR, PRCP, color=WYEAR %in% unique(sim_years))) +
+  geom_point() +
+  geom_hline(yint=wgen_mc$x[1, 1], linetype=2, color='red') +
+  geom_text(aes(label=WYEAR), hjust=-0.1, vjust=0.5, size=4) +
+  scale_color_manual('', values=c('TRUE'='orangered', 'FALSE'='grey50'), guide=FALSE) +
+  labs(x="Water Year", y="Annual Precip (mm/yr)")
+```
+
+This figure shows the sampled frequency (bars) and probabilities (blue points) of each water year.
+
+```{r plot-knn-prob}
+data.frame(WYEAR=sim_years) %>%
+  group_by(WYEAR) %>%
+  summarise(N=n()) %>%
+  left_join(select(clim.wyr, WYEAR, PRCP)) %>%
+  mutate(DISTANCE=sqrt((wgen_mc$x[1, 1] - PRCP)^2)) %>%
+  arrange(DISTANCE) %>%
+  mutate(PROB=(1/row_number())/sum(1/row_number()),
+         FREQ=N/sum(N),
+         WYEAR=ordered(WYEAR, levels=WYEAR)) %>%
+  ggplot(aes(WYEAR)) +
+  geom_bar(aes(y=FREQ), stat='identity', fill='grey70') +
+  geom_point(aes(y=PROB), color='deepskyblue', size=3) +
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5)) +
+  labs(x="Water Year", y="Observed Frequency/Probability")
+```
+
+If we increase the sample size from 100 to 100,000 then the sampled frequency and probabilities converge:
+
+```{r}
+data.frame(WYEAR=select_knn_year(sim_prcp=wgen_mc$x[1, 1], obs_prcp=clim.wyr$PRCP, obs_years=clim.wyr$WYEAR, n=100000)) %>%
+  group_by(WYEAR) %>%
+  summarise(N=n()) %>%
+  left_join(select(clim.wyr, WYEAR, PRCP)) %>%
+  mutate(DISTANCE=sqrt((wgen_mc$x[1, 1] - PRCP)^2)) %>%
+  arrange(DISTANCE) %>%
+  mutate(PROB=(1/row_number())/sum(1/row_number()),
+         FREQ=N/sum(N),
+         WYEAR=ordered(WYEAR, levels=WYEAR)) %>%
+  ggplot(aes(WYEAR)) +
+  geom_bar(aes(y=FREQ), stat='identity', fill='grey70') +
+  geom_point(aes(y=PROB), color='deepskyblue', size=3) +
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5)) +
+  labs(x="Water Year", y="Observed Frequency/Probability")
+```
+
+Using the sampled water years, create a continuous time series of daily weather for simulating the daily weather of the first simulation year.
+
+```{r}
+sampled_day <- lapply(sim_years, function(yr) {
+  clim.da[which(clim.da$WYEAR==yr), ]
+}) %>%
+  do.call(rbind, .)
+
+stopifnot(all(unique(sampled_day$WYEAR) %in% unique(sim_years)))
+```
+
+```{r}
+sim_day_1 <- wgen_historical_day(sampled_day, n_year = 1, start_month = 10)
+all(unique(wyear(sim_day_1$SAMPLE_DATE)) %in% sim_years)
+```
+
+```{r}
+select(sim_day_1, WDAY, PRCP, TMIN, TMAX, TEMP) %>%
+  gather(VAR, VALUE, PRCP:TEMP) %>%
+  ggplot(aes(WDAY, VALUE)) +
+  geom_line() +
+  facet_wrap(~VAR, scales='free_y') +
+  labs(x='Simulation Day', y='')
+```
+
+Run all years
+
+```{r}
+library(parallel)
+sim_day_list <- mclapply(seq_along(wgen_mc$x[, 1]), function(i) {
+  sim_prcp <- wgen_mc$x[i, 1]
+  sim_years <- select_knn_year(sim_prcp=sim_prcp, obs_prcp=clim.wyr$PRCP, obs_years=clim.wyr$WYEAR, n=100)
+  sampled_day <- lapply(sim_years, function(yr) {
+    clim.da[which(clim.da$WYEAR==yr), ]
+  })
+  sampled_day <- do.call(rbind, sampled_day)
+  stopifnot(all(unique(sampled_day$WYEAR) %in% unique(sim_years)))
+  
+  sim_day_1 <- wgen_historical_day(sampled_day, n_year = 1, start_month = 10)
+  stopifnot(all(unique(wyear(sim_day_1$SAMPLE_DATE)) %in% sim_years))
+  sim_day_1['SIM_YEAR'] <- i
+  sim_day_1
+}, mc.cores=6)
+sim_day <- do.call(rbind, sim_day_list)
+sim_day <- mutate(sim_day, DATE=DATE+years(SIM_YEAR-1))
+```
+
+```{r}
+select(sim_day, DATE, PRCP, TMIN, TMAX, TEMP) %>% 
+  gather(VAR, VALUE, PRCP:TEMP) %>% 
+  ggplot(aes(DATE, VALUE)) + 
+  geom_line() + 
+  facet_wrap(~VAR, scales='free_y')
+```
+
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```
+

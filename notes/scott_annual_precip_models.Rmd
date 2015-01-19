@@ -1,0 +1,718 @@
+---
+title: "Annual Precipitation Models"
+author: "Jeffrey D Walker, PhD"
+date: "August 19, 2014"
+output:
+  html_document:
+    toc: yes
+---
+
+# Load Data
+
+```{r load data, warning=FALSE, message=FALSE}
+library(forecast)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+theme_set(theme_bw())
+library(weathergen)
+data(climate)
+
+# set RNG seed for reproducibility
+set.seed(1234)
+
+# compute daily averages across sites
+clim.da <- group_by(climate, DATE) %>%
+  summarise(N=n(),
+            PRCP=mean(PRCP),
+            TMIN=mean(TMIN),
+            TMAX=mean(TMAX))
+
+# aggregate by water year
+clim.wyr <- clim.da %>%
+  mutate(WYEAR=wyear(DATE)) %>%
+  group_by(WYEAR) %>%
+  summarise(N=n(),
+            PRCP=sum(PRCP),
+            TMIN=mean(TMIN),
+            TMAX=mean(TMAX))
+```
+
+This figure shows the annual precipitation timeseries.
+
+```{r plot annual data, fig.cap="Annual Timeseries"}
+ggplot(clim.wyr, aes(WYEAR, PRCP)) +
+  geom_line() +
+  labs(x="Water Year", y="Annual Precipitation (mm)")
+```
+
+# Scott's Scripts
+
+## Wavelet Analysis
+
+```{r scott functions, echo=FALSE}
+WAVELET_ANALYSIS <- function(CLIMATE_VARIABLE,siglvl,background_noise,plot_flag) {
+  if (missing(plot_flag)) {plot_flag <- TRUE}
+	if (missing(siglvl)) {siglvl <- 0.90}
+	if (missing(background_noise)) {background_noise <- "white"}
+	
+	#Define Wavelet function used that returns transform
+	waveletf <- function(k,s) {
+		nn <- length(k)
+		k0 <- 6    #nondimensional frequency, here taken to be 6 to satisfy the admissibility condition [Farge 1992]
+		z <- array(1,nn)
+		z[which(k<=0)] <- 0
+		expnt <- -((s*k - k0)^2/2)*z
+		norm <- sqrt(s*k[2])*(pi^(-0.25))*sqrt(nn)    # total energy=N   [Eqn(7)]
+		daughter <- norm*exp(expnt)
+		daughter <- daughter*z
+		fourier_factor <- (4*pi)/(k0 + sqrt(2 + k0^2)) # Scale-->Fourier [Sec.3h]
+		coi <- fourier_factor/sqrt(2)                  # Cone-of-influence [Sec.3g]
+		dofmin <- 2  	# Degrees of freedom	
+		return(daughter)
+	}
+
+	#Define Wavelet function used that returns fourier_factor, cone of influence, and degrees of freedom
+	waveletf2 <- function(k,s) {
+		nn <- length(k)
+		k0 <- 6    #nondimensional frequency, here taken to be 6 to satisfy the admissibility condition [Farge 1992]
+		z <- array(1,nn)
+		z[which(k<=0)] <- 0
+		expnt <- -((s*k - k0)^2/2)*z
+		norm <- sqrt(s*k[2])*(pi^(-0.25))*sqrt(nn)    # total energy=N   [Eqn(7)]
+		daughter <- norm*exp(expnt)
+		daughter <- daughter*z
+		fourier_factor <- (4*pi)/(k0 + sqrt(2 + k0^2)) # Scale-->Fourier [Sec.3h]
+		coi <- fourier_factor/sqrt(2)                  # Cone-of-influence [Sec.3g]
+		dofmin <- 2  	# Degrees of freedom	
+		return(c(fourier_factor,coi,dofmin))
+	}
+
+	# Perform Wavelet
+	#....construct time series to analyze, pad if necessary
+	CURRENT_CLIMATE_VARIABLE_org <- CLIMATE_VARIABLE
+	variance1 <- var(CURRENT_CLIMATE_VARIABLE_org)
+	n1 <- length(CURRENT_CLIMATE_VARIABLE_org)
+	CURRENT_CLIMATE_VARIABLE <- scale(CURRENT_CLIMATE_VARIABLE_org)
+	variance2 <- var(CURRENT_CLIMATE_VARIABLE)
+	base2 <- floor(log(n1)/log(2) + 0.4999)   # power of 2 nearest to N
+	CURRENT_CLIMATE_VARIABLE <- c(CURRENT_CLIMATE_VARIABLE,rep(0,(2^(base2+1)-n1)))
+	n <- length(CURRENT_CLIMATE_VARIABLE)
+
+	#Determine parameters for Wavelet analysis
+	dt <- 1
+	dj <- 0.25
+	s0 <- 2*dt
+	J <- floor((1/dj)*log((n1*dt/s0),base=2))
+
+	#....construct SCALE array & empty PERIOD & WAVE arrays
+	scale <- s0*2^((0:J)*dj)
+	period <- scale
+	wave <- array(as.complex(0),c(J+1,n))  # define the wavelet array
+
+	#....construct wavenumber array used in transform [Eqn(5)]
+	k <- c(1:floor(n/2))
+	k <- k*((2.*pi)/(n*dt))
+	k <- c(0,k,-rev(k[1:floor((n-1)/2)]))
+
+	f <- fft(CURRENT_CLIMATE_VARIABLE,inverse=FALSE)        #fourier transform of standardized precipitation
+
+	# loop through all scales and compute transform
+	for (a1 in 1:(J+1)) {
+		daughter <- waveletf(k,scale[a1])
+		results <- waveletf2(k,scale[a1])
+		fourier_factor <- results[1]
+		coi <- results[2]
+		dofmin <- results[3]
+		wave[a1,] <- fft(f*daughter,inverse=TRUE)/n  # wavelet transform[Eqn(4)]
+	}
+
+	period <- fourier_factor*scale
+	coi <- coi*dt*c((0.00001),1:((n1+1)/2-1),rev((1:(n1/2-1))),(0.00001))  # COI [Sec.3g]
+	wave <- wave[,1:n1]  # get rid of padding before returning
+	POWER <- abs(wave)^2
+	GWS <- variance1*apply(POWER,FUN=mean,c(1)) #Global Wavelet Spectrum
+
+	# Significance Testing
+	# get the appropriate parameters [see Table(2)]
+	k0 <- 6
+	empir <- c(2,0.776,2.32,0.60)
+	dofmin <- empir[1]     # Degrees of freedom with no smoothing
+	Cdelta <- empir[2]     # reconstruction factor
+	gamma_fac <- empir[3]  # time-decorrelation factor
+	dj0 <- empir[4]       # scale-decorrelation factor
+	if (background_noise=="white") {lag1 <- 0}    #for red noise background, lag1 autocorrelation = 0.72, for white noise background, lag1 autocorrelation = 0
+	if (background_noise=="red") {lag1 <- .72}
+
+	freq <- dt / period   # normalized frequency
+	fft_theor <- (1-lag1^2) / (1-2*lag1*cos(freq*2*pi)+lag1^2)  # [Eqn(16)]			
+	fft_theor <- fft_theor  # include time-series variance
+	dof <- dofmin
+
+	#ENTIRE POWER SPECTRUM
+	chisquare <- qchisq(siglvl,dof)/dof
+	signif <- fft_theor*chisquare   # [Eqn(18)]
+	sig95 <- ((signif))%o%(array(1,n1))  # expand signif --> (J+1)x(N) array
+	sig95 <- POWER / sig95         # where ratio > 1, power is significant
+
+	#TIME_AVERAGED (GLOBAL WAVELET SPECTRUM)
+	dof <- n1 - scale
+	if (length(dof) == 1) {dof <- array(0,(J+1))+dof}
+	dof[which(dof < 1)] <- 1
+	dof <- dofmin*sqrt(1 + (dof*dt/gamma_fac / scale)^2 )   
+	tt <- which(dof < dofmin)
+	dof[tt] <- dofmin
+	chisquare_GWS <- array(NA,(J+1))
+	signif_GWS <- array(NA,(J+1))
+	for (a1 in 1:(J+1)) {
+		chisquare_GWS[a1] <- qchisq(siglvl,dof[a1])/dof[a1]
+		signif_GWS[a1] <- fft_theor[a1]*variance1*chisquare_GWS[a1]
+	}
+  
+  # PLOT
+	period_lower_limit <- 0
+	sig_periods <- which(GWS>signif_GWS & period > period_lower_limit)
+	if (plot_flag) {
+		par(mfrow=c(1,2),font.axis=2,font.lab=2,cex.axis=1.1,cex.lab=1.1)
+		xx <- 1:n1
+		yy <- period
+		image(x=xx,y=yy,z=t(log(POWER,base=2)),xlab="Time (Years)",ylab="Fourier Period (Years)",ylim=rev(range(yy)),log="y",col=(heat.colors(12)))
+		lines(xx,coi,lty=2)
+		contour(x=xx,y=yy,z=t(sig95),add=TRUE,levels=c(-99,1),labels="")
+
+		xmin <- (min(GWS,signif_GWS))
+		xmax <- (max(GWS,signif_GWS))
+		plot(GWS,yy,type="b",xlim=c(xmin,xmax),xlab="Global Wavelet Spectrum",ylab="Fourier Period (Years)",log="y",ylim=rev(range(yy)))
+		lines(signif_GWS,yy,col="red",lty=2)
+		if (background_noise=="white") {tt <- paste(siglvl*100,"% confidence \nlevel for white-noise\n spectrum",sep="")}    
+		if (background_noise=="red") {tt <- paste(siglvl*100,"% confidence \nlevel for red-noise\n spectrum",sep="")}
+		legend(.2*max(GWS),.65*max(yy),tt,col="red",lty=2,box.lty=0,box.lwd=0,cex=.8)
+		mtext("SIGNIFICANT PERIODS:",line=2)
+		e <- paste(sig_periods[1])
+		if (length(sig_periods)==0) {
+			mtext("NONE!",line=1)
+		} else if (length(sig_periods)==1) {
+			mtext(e,line=1)
+		} else {
+			for (h in 2:length(sig_periods)) {
+				e <- paste(e,",",paste(sig_periods[h]),sep="")
+			}
+			mtext(e,line=1)
+		}
+	}
+	
+	return(list(GWS,signif_GWS,period))
+}
+
+WAVELET_DECOMPOSITION <- function(CLIMATE_VARIABLE,NUM_FINAL_PERIODS,ALL_SIG_PERIODS,NUM_PERIODS_ALL_COMPS,plot_flag) {
+  if (missing(plot_flag)) {plot_flag <- TRUE}
+  #Define Wavelet function used that returns transform
+	waveletf <- function(k,s) {
+		nn <- length(k)
+		k0 <- 6    #nondimensional frequency, here taken to be 6 to satisfy the admissibility condition [Farge 1992]
+		z <- array(1,nn)
+		z[which(k<=0)] <- 0
+		expnt <- -((s*k - k0)^2/2)*z
+		norm <- sqrt(s*k[2])*(pi^(-0.25))*sqrt(nn)    # total energy=N   [Eqn(7)]
+		daughter <- norm*exp(expnt)
+		daughter <- daughter*z
+		fourier_factor <- (4*pi)/(k0 + sqrt(2 + k0^2)) # Scale-->Fourier [Sec.3h]
+		coi <- fourier_factor/sqrt(2)                  # Cone-of-influence [Sec.3g]
+		dofmin <- 2  	# Degrees of freedom	
+		return(daughter)
+	}
+
+	#Define Wavelet function used that returns fourier_factor, cone of influence, and degrees of freedom
+	waveletf2 <- function(k,s) {
+		nn <- length(k)
+		k0 <- 6    #nondimensional frequency, here taken to be 6 to satisfy the admissibility condition [Farge 1992]
+		z <- array(1,nn)
+		z[which(k<=0)] <- 0
+		expnt <- -((s*k - k0)^2/2)*z
+		norm <- sqrt(s*k[2])*(pi^(-0.25))*sqrt(nn)    # total energy=N   [Eqn(7)]
+		daughter <- norm*exp(expnt)
+		daughter <- daughter*z
+		fourier_factor <- (4*pi)/(k0 + sqrt(2 + k0^2)) # Scale-->Fourier [Sec.3h]
+		coi <- fourier_factor/sqrt(2)                  # Cone-of-influence [Sec.3g]
+		dofmin <- 2  	# Degrees of freedom	
+		return(c(fourier_factor,coi,dofmin))
+	}
+	# Perform wavelet transform
+	#....construct time series to analyze, pad if necessary
+	CURRENT_CLIMATE_VARIABLE_org <- CLIMATE_VARIABLE
+	variance1 <- var(CURRENT_CLIMATE_VARIABLE_org)
+	n1 <- length(CURRENT_CLIMATE_VARIABLE_org)
+	CURRENT_CLIMATE_VARIABLE <- scale(CURRENT_CLIMATE_VARIABLE_org)
+	variance2 <- var(CURRENT_CLIMATE_VARIABLE)
+	base2 <- floor(log(n1)/log(2) + 0.4999)   # power of 2 nearest to N
+	CURRENT_CLIMATE_VARIABLE <- c(CURRENT_CLIMATE_VARIABLE,rep(0,(2^(base2+1)-n1)))
+	n <- length(CURRENT_CLIMATE_VARIABLE)
+
+	#Determine parameters for Wavelet analysis
+	dt <- 1
+	dj <- 0.25
+	s0 <- 2*dt
+	J <- floor((1/dj)*log((n1*dt/s0),base=2))
+
+	#....construct SCALE array & empty PERIOD & WAVE arrays
+	scale <- s0*2^((0:J)*dj)
+	period <- scale
+	wave <- array(as.complex(0),c(J+1,n))  # define the wavelet array
+
+	#....construct wavenumber array used in transform [Eqn(5)]
+	k <- c(1:floor(n/2))
+	k <- k*((2.*pi)/(n*dt))
+	k <- c(0,k,-rev(k[1:floor((n-1)/2)]))
+
+	f <- fft(CURRENT_CLIMATE_VARIABLE,inverse=FALSE)        #fourier transform of standardized precipitation
+
+	# loop through all scales and compute transform
+	for (a1 in 1:(J+1)) {
+		daughter <- waveletf(k,scale[a1])
+		results <- waveletf2(k,scale[a1])
+		fourier_factor <- results[1]
+		coi <- results[2]
+		dofmin <- results[3]
+		wave[a1,] <- fft(f*daughter,inverse=TRUE)/n  # wavelet transform[Eqn(4)]
+	}
+
+	period <- fourier_factor*scale
+	coi <- coi*dt*c((0.00001),1:((n1+1)/2-1),rev((1:(n1/2-1))),(0.00001))  # COI [Sec.3g]
+	wave <- wave[,1:n1]  # get rid of padding before returning
+	POWER <- abs(wave)^2
+	GWS <- variance1*apply(POWER,FUN=mean,c(1)) #Global Wavelet Spectrum
+
+	# Signficance Testing
+	background_noise <- "white"   #can be red or white 
+
+	siglvl <- 0.95
+	# get the appropriate parameters [see Table(2)]
+	k0 <- 6
+	empir <- c(2,0.776,2.32,0.60)
+	dofmin <- empir[1]     # Degrees of freedom with no smoothing
+	Cdelta <- empir[2]     # reconstruction factor
+	gamma_fac <- empir[3]  # time-decorrelation factor
+	dj0 <- empir[4]       # scale-decorrelation factor
+	if (background_noise=="white") {lag1 <- 0}    #for red noise background, lag1 autocorrelation = 0.72, for white noise background, lag1 autocorrelation = 0
+	if (background_noise=="red") {lag1 <- .72}
+
+	freq <- dt / period   # normalized frequency
+	fft_theor <- (1-lag1^2) / (1-2*lag1*cos(freq*2*pi)+lag1^2)  # [Eqn(16)]			
+	fft_theor <- fft_theor  # include time-series variance
+	dof <- dofmin
+
+	#ENTIRE POWER SPECTRUM
+	chisquare <- qchisq(siglvl,dof)/dof
+	signif <- fft_theor*chisquare   # [Eqn(18)]
+	sig95 <- ((signif))%o%(array(1,n1))  # expand signif --> (J+1)x(N) array
+	sig95 <- POWER / sig95         # where ratio > 1, power is significant
+
+	#TIME_AVERAGED (GLOBAL WAVELET SPECTRUM)
+	dof <- n1 - scale
+	if (length(dof) == 1) {dof <- array(0,(J+1))+dof}
+	dof[which(dof < 1)] <- 1
+	dof <- dofmin*sqrt(1 + (dof*dt/gamma_fac / scale)^2 )   
+	tt <- which(dof < dofmin)
+	dof[tt] <- dofmin
+	chisquare_GWS <- array(NA,(J+1))
+	signif_GWS <- array(NA,(J+1))
+	for (a1 in 1:(J+1)) {
+		chisquare_GWS[a1] <- qchisq(siglvl,dof[a1])/dof[a1]
+		signif_GWS[a1] <- fft_theor[a1]*variance1*chisquare_GWS[a1]
+	}
+
+	LOW_FREQUENCY_COMPONENTS <- array(0,c(length(CLIMATE_VARIABLE),NUM_FINAL_PERIODS))
+	for (i in 1:NUM_FINAL_PERIODS) {
+		CUR_PERIODS <- ALL_SIG_PERIODS[1:NUM_PERIODS_ALL_COMPS[i]]
+		if (i>1) {CUR_PERIODS <- ALL_SIG_PERIODS[(1 + (i-1)*NUM_PERIODS_ALL_COMPS[i-1]):(NUM_PERIODS_ALL_COMPS[i] + (i-1)*NUM_PERIODS_ALL_COMPS[i-1])]}
+		sj <- scale[CUR_PERIODS]
+		#for Morlet Wavelet with freq = 6
+		Cdelta <- .776
+		w0_0 <- pi^(-1/4)
+		if (length(CUR_PERIODS)>1) {LOW_FREQUENCY_COMPONENTS[,i] <- apply(sd(CURRENT_CLIMATE_VARIABLE_org)*(dj*sqrt(dt)/(Cdelta*w0_0))*Re(wave)[CUR_PERIODS,]/sqrt(sj),FUN=sum,c(2))}
+		if (length(CUR_PERIODS)==1) {LOW_FREQUENCY_COMPONENTS[,i] <- sd(CURRENT_CLIMATE_VARIABLE_org)*(dj*sqrt(dt)/(Cdelta*w0_0))*Re(wave)[CUR_PERIODS,]/sqrt(sj)}
+	}
+
+	NOISE <- CURRENT_CLIMATE_VARIABLE_org - apply(LOW_FREQUENCY_COMPONENTS,FUN=sum,c(1)) 
+	
+	if (plot_flag) {
+		par(mfrow=c((2+NUM_FINAL_PERIODS),1),font.axis=2,font.lab=2)
+		plot(CLIMATE_VARIABLE,type="l",main="ORIGINAL DATA",xlab="TIME (YEARS)",ylab="")
+		for (k in 1:NUM_FINAL_PERIODS){
+			plot(LOW_FREQUENCY_COMPONENTS[,1],type="l",main=paste("COMPONENT",k),xlab="TIME (YEARS)",ylab="")
+		}
+		plot(NOISE,type="l",main="NOISE",xlab="TIME (YEARS)",ylab="")
+    par(mfrow=c(1,1))
+	}
+	return(cbind(NOISE,LOW_FREQUENCY_COMPONENTS))	
+}
+```
+
+First, perform the wavelet analysis to identify significant periods using `WAVELET_ANALYSIS()`.
+
+```{r wavelet analysis scott}
+wave <- WAVELET_ANALYSIS(clim.wyr$PRCP, siglvl=0.90,
+                         background_noise="white", plot_flag=TRUE)
+```
+
+This figure shows that periods 11 and 12 are significant. We then use the `WAVELET_DECOMPOSITION()` function to create a wavelet component that is the sum of these two periods. This function also computes the noise component.
+
+```{r wavelet components scott}
+wave.comp <- WAVELET_DECOMPOSITION(CLIMATE_VARIABLE=clim.wyr$PRCP,
+                                   NUM_FINAL_PERIODS=1,
+                                   ALL_SIG_PERIODS=c(11,12),
+                                   NUM_PERIODS_ALL_COMPS=2,
+                                   plot_flag=TRUE)
+head(wave.comp)
+```
+
+## Create ARIMA Models
+
+We can then create ARMA models of each wavelet and noise component.
+
+```{r warm arima models}
+models <- list(NOISE=auto.arima(wave.comp[, 1],
+                                max.p=2,max.q=2,max.P=0,max.Q=0,
+                                stationary=TRUE),
+               COMPONENT=auto.arima(wave.comp[, 2],
+                                    max.p=2,max.q=2,max.P=0,max.Q=0,
+                                    stationary=TRUE))
+models
+```
+
+This figure shows the forecast of each ARMA model (top panel is the noise component, bottom panel is the wavelet component).
+
+```{r plot_warm_forecast}
+par(mfrow=c(2,1))
+plot(forecast(models[["NOISE"]], h=nrow(clim.wyr)))
+plot(forecast(models[["COMPONENT"]], h=nrow(clim.wyr)))
+par(mfrow=c(1,1))
+```
+
+We could also simply create an ARMA model of the precipitation timeseries directly, in which case we would not be using the WARM procedure described by Steinschneider and Brown (2013).
+
+```{r arima model}
+ar_models.arima <- list(PRECIP=auto.arima(clim.wyr$PRCP,
+                                          max.p=2,max.q=2,max.P=0,max.Q=0,
+                                          stationary=TRUE))
+ar_models.arima[["PRECIP"]]
+```
+
+Note that this model is a zero order AR and zero order MA, and therefore is simply based on the mean value and thus excludes any low-frequency component.
+
+```{r plot_arima}
+plot(forecast(ar_models.arima[["PRECIP"]], h=nrow(clim.wyr)))
+```
+
+## ARIMA Model Simulations
+
+Using the ARMA models of the noise and wavelet components, we can generate forecasts of annual precipitation using the `arima.sim()` function. This function is wrapped in a new function called `simulate.arima()` that simulates a single ARMA model.
+
+```{r simulate arima}
+simulate.arima <- function(model, n) {
+  # simulate one arima model
+  sim <- arima.sim(n=n, 
+                   list(ar=coef(model)[grepl('ar', names(coef(model)))],
+                        ma=coef(model)[grepl('ma', names(coef(model)))]),
+                   sd = sqrt(model$sigma2[[1]]))
+  
+  # extract intercept
+  if ('intercept' %in% names(model$coef)) {
+    intercept <- model$coef['intercept']
+  } else {
+    intercept <- 0
+  }
+
+  # add intercept (mean) to current simulation
+  sim <- sim + intercept
+  
+  return(coredata(sim))
+}
+simulate.arima(model=models[['COMPONENT']], n=40)
+```
+
+Another new function called `simulate.arimas()` then takes a list of models (with each element containing a single wavelet or noise component), performs the individual simulations, and then computes the overall sum. The result is a single simulated timeseries of annual precipitation.
+
+```{r simulate arimas}
+simulate.arimas <- function(models, n, components=TRUE) {
+  # n: number of simulation timesteps
+  # models: list of arima models
+  # components: if TRUE returns list of $sum and $components, otherwise returns just sum vector
+  
+  # run simulation on each model and combine into 2-d array
+  sim.components <- lapply(models, simulate.arima, n=n) %>% sapply(cbind)
+  
+  # compute sum of individual component simulations
+  if (ncol(sim.components) > 1) {
+    sim.sum <- apply(sim.components, FUN=sum, 1)
+  } else {
+    sim.sum <- sim.components
+  }
+  
+  if (components) {
+    return(list(components=sim.components, sum=sim.sum))  
+  } else {
+    return(sim.sum)
+  }
+  
+}
+sim.warm <- simulate.arimas(models=models, n=40)
+sim.warm
+```
+
+Here is a plot of the resulting simulated annual precipitation timeseries.
+
+```{r plot_sim_prcp}
+plot(sim.warm$sum, type='l', xlab='Timestep (year)', ylab='Simulated Annual Precip (mm)')
+```
+
+We then perform a wavelet analysis of the simulated precipitation to compare the GWS of the observed timeseries with that of the simulated timeseries.
+
+```{r wavelet analysis of sim precip}
+wt.sim.warm <- WAVELET_ANALYSIS(sim.warm$sum, siglvl=0.90,
+                                background_noise="white", plot_flag=TRUE)
+```
+
+Next, we repeat this procedure through a Monte Carlo simulation by generating `n.iter` simulation timeseries. Based on this set of simulations, we can compute some statistics on the simulation GWS power to compare against the GWS power of the observed timeseries.
+
+```{r sim arimas monte carlo}
+n.iter <- 100
+n.sim <- 40
+
+sim.warm.prcp <- array(NA, c(n.sim, n.iter))
+sim.warm.gws <- array(NA, c(length(wt.sim.warm[[1]]), n.iter))
+for (i in 1:n.iter) {
+  i.sim.warm <- simulate.arimas(models=models, n=40)
+  i.wt <- WAVELET_ANALYSIS(i.sim.warm$sum, siglvl=0.90,
+                           background_noise="white", plot_flag=FALSE)
+  sim.warm.prcp[,i] <- i.sim.warm$sum
+  sim.warm.gws[,i] <- i.wt[[1]]
+}
+
+sim.warm.prcp.stat <- cbind(MEAN=rowMeans(sim.warm.prcp),
+                            Q025=apply(sim.warm.prcp, 1, quantile, 0.025),
+                            Q975=apply(sim.warm.prcp, 1, quantile, 0.975))
+
+sim.warm.gws.stat <- cbind(MEAN=rowMeans(sim.warm.gws),
+                           Q025=apply(sim.warm.gws, 1, quantile, 0.025),
+                           Q975=apply(sim.warm.gws, 1, quantile, 0.975))
+```
+
+This plot shows the mean across the simulation timeseries, with the shaded region representing the 2.5 and 97.5 percent quantiles.
+
+```{r plot_sim_precip}
+par(mfrow=c(1,1))
+plot(sim.warm.prcp.stat[, 'MEAN'], type='n', 
+     xlab="Water Year", ylab="Simulated Precip (mm/yr)",
+     ylim=range(sim.warm.prcp.stat))
+polygon(c(seq(1, nrow(sim.warm.prcp.stat)),
+          rev(seq(1, nrow(sim.warm.prcp.stat)))),
+        c(sim.warm.prcp.stat[, 'Q025'],
+          rev(sim.warm.prcp.stat[, 'Q975'])),col="grey")
+lines(sim.warm.prcp.stat[, 'MEAN'], col='red')
+```
+
+This figure shows each individual simulated timeseries (the red line is the overall mean).
+
+```{r plot_sim_precip_ggplot}
+as.data.frame(sim.warm.prcp) %>% 
+  mutate(YEAR=seq(1:nrow(sim.warm.prcp))) %>%
+  gather(TRIAL, VALUE, -YEAR) %>% 
+  ggplot(aes(YEAR, VALUE)) +
+  geom_line(aes(group=TRIAL), alpha=0.1) +
+  stat_summary(fun.y=mean, geom='line', color='red') +
+  labs(x='Year', y="Simulated Annual Precip (mm/yr)")
+```
+
+This figure summarises the spectrum power for each period, and compares the mean, standard deviation and skew of the simulated (blue) and observed (red) annual timeseries.
+
+```{r plot_sim_gws, fig.height=8}
+par(mfrow=c(2,2))
+x1 <- 1
+x2 <- length(wave[[3]])
+ymin <- min(wave[[1]], wave[[2]],
+            sim.warm.gws.stat[x1:x2, 'MEAN'],
+            sim.warm.gws.stat[x1:x2, 'Q025'])
+ymax <- max(wave[[1]], wave[[2]],
+            sim.warm.gws.stat[x1:x2, 'MEAN'],
+            sim.warm.gws.stat[x1:x2, 'Q975'])
+plot(wave[[3]], wave[[1]],
+     type="n", ylim=c(ymin,ymax), xlab="Period (years)", ylab="",
+     main="", log="y")
+mtext(side=2, expression(paste("Power (",mm^2,")")), line=2.5)
+polygon(c(wave[[3]],
+          rev(wave[[3]])),
+        c(sim.warm.gws.stat[x1:x2, 'Q025'],
+          rev(sim.warm.gws.stat[x1:x2, 'Q975'])),
+        col="grey")
+lines(wave[[3]], wave[[1]])
+lines(wave[[3]], sim.warm.gws.stat[x1:x2, 'MEAN'], lty=2, col="blue")
+lines(wave[[3]], wave[[2]], col="red", lty=3)
+
+boxplot(colMeans(sim.warm.prcp), main="Mean")
+points(mean(clim.wyr$PRCP),col="red",pch=19)
+points(mean(colMeans(sim.warm.prcp)), col="blue", pch=19)
+
+boxplot(apply(sim.warm.prcp, 2, sd), main="Standard Deviation")
+points(sd(clim.wyr$PRCP), col="red", pch=19)
+points(mean(apply(sim.warm.prcp, 2, sd)), col="blue", pch=19)
+
+boxplot(apply(sim.warm.prcp, 2, skewness), main="Skew")
+points(skewness(clim.wyr$PRCP), col="red", pch=19)
+points(mean(apply(sim.warm.prcp, 2, skewness)),col="blue",pch=19)
+```
+
+The figure above shows the distributions of power, mean, standard deviation and skewness for the monte carlo simulations of the arima models. The GWS power for the historical data is the black line, the mean GWS power for the arima models is the blue line, and the significance thresholds is the red line. The shaded area is the 2.5-97.5% confidence interval of the simulated GWS power. 
+
+The boxplots are the distributions of the three statistics for the monte carlo simulations, the red dot is the statistic of the historical timeseries, and the blue dot is the mean statistic for the simulated timeseries.
+
+# weathergen Package
+
+We can repeat the same analysis using the `weathergen` package.
+
+## Wavelet Analysis
+
+First, perform the wavelet analysis.
+
+```{r wgen wave}
+wgen_wave <- weathergen::wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, 
+                                          noise.type='white')
+```
+
+Then reconstruct the wavelet components.
+
+```{r}
+wgen_wave.comp <- weathergen::wavelet_components(x=clim.wyr$PRCP, 
+                                                 wt=wgen_wave, 
+                                                 n.periods=1, 
+                                                 sig.periods=c(11,12), 
+                                                 n.comp.periods=2)
+```
+
+## Create ARIMA Models
+
+Now create the arima models.
+
+```{r wgen arima models}
+wgen_models <- weathergen::arima_models(components=wgen_wave.comp)
+```
+
+Here is a plot of the forecasts for each component arima model (top panel is the noise component, bottom panel is the wavelet component).
+
+```{r wgen plot forecast}
+par(mfrow=c(2,1))
+plot(forecast(wgen_models[["NOISE"]], h=nrow(clim.wyr)))
+plot(forecast(wgen_models[["COMPONENT 1"]], h=nrow(clim.wyr)))
+par(mfrow=c(1,1))
+```
+
+## ARIMA Model Simulations
+
+Simulations for each ARIMA models are generated using the `weathergen::simulate.arima()` function.
+
+```{r wgen simulate arima}
+weathergen::simulate_arima(model=wgen_models[['COMPONENT 1']], n=40)
+```
+
+And the `weathergen::simulate.arimas()` function can then be used to simulate a list of arima models containing multiple components (noise and wavelet).
+
+```{r wgen simulate arimas}
+wgen_sim.warm <- weathergen::simulate_arimas(models=wgen_models, n=40)
+wgen_sim.warm
+```
+
+Here is a plot of the resulting simulated annual precipitation timeseries.
+
+```{r wgen plot sim precip}
+plot(wgen_sim.warm$sum, type='l', xlab='Timestep (year)', ylab='Simulated Annual Precip (mm)')
+```
+
+We can then perform a wavelet analysis of the simulated precipitation to compare the GWS of the observed timeseries with that of the simulated timeseries.
+
+```{r wgen wavelet analysis sim precip}
+wgen_wt.sim.warm <- weathergen::wavelet_analysis(wgen_sim.warm$sum, sig.level=0.90,
+                                                 noise.type='white')
+```
+
+Finally, we can use the `weathergen::mc_arima()` function to perform a Monte Carlo simulation by repeating this procedure multiple times.
+
+```{r wgen mc arimas, message=FALSE, warning=FALSE}
+wgen_mc <- weathergen::mc_arimas(models=wgen_models, n=40, n.iter=100)
+str(wgen_mc)
+```
+
+This plot shows the mean across the simulation timeseries, with the shaded region representing the 2.5 and 97.5 percent quantiles.
+
+```{r plot wgen mc x}
+par(mfrow=c(1,1))
+plot(wgen_mc$x.stat[, 'MEAN'], type='n', 
+     xlab="Water Year", ylab="Simulated Precip (mm/yr)",
+     ylim=range(wgen_mc$x.stat))
+polygon(c(seq(1, nrow(wgen_mc$x.stat)),
+          rev(seq(1, nrow(wgen_mc$x.stat)))),
+        c(wgen_mc$x.stat[, 'Q025'],
+          rev(wgen_mc$x.stat[, 'Q975'])),col="grey")
+lines(wgen_mc$x.stat[, 'MEAN'], col='red')
+```
+
+This figure shows each individual simulated timeseries (the red line is the overall mean).
+
+```{r plot wgen mc x ggplot}
+as.data.frame(wgen_mc$x) %>% 
+  mutate(YEAR=seq(1:nrow(wgen_mc$x))) %>%
+  gather(TRIAL, VALUE, -YEAR) %>% 
+  ggplot(aes(YEAR, VALUE)) +
+  geom_line(aes(group=TRIAL), alpha=0.1) +
+  stat_summary(fun.y=mean, geom='line', color='red') +
+  labs(x='Year', y="Simulated Annual Precip (mm/yr)")
+```
+
+This figure summarises the spectrum power for each period, and compares the mean, standard deviation and skew of the simulated (blue) and observed (red) annual timeseries.
+
+```{r wgen plot mc summary, fig.height=8}
+par(mfrow=c(2,2))
+x1 <- 1
+x2 <- length(wgen_wave$period)
+ymin <- min(wgen_wave$period, wgen_wave$gws,
+            wgen_mc$gws.stat[x1:x2, 'MEAN'],
+            wgen_mc$gws.stat[x1:x2, 'Q025'])
+ymax <- max(wgen_wave$period, wgen_wave$gws,
+            wgen_mc$gws.stat[x1:x2, 'MEAN'],
+            wgen_mc$gws.stat[x1:x2, 'Q975'])
+plot(wgen_wave$period, wgen_wave$gws,
+     type="n", ylim=c(ymin,ymax), xlab="Period (years)", ylab="",
+     main="", log="y")
+mtext(side=2, expression(paste("Power (",mm^2,")")), line=2.5)
+polygon(c(wgen_wave$period,
+          rev(wgen_wave$period)),
+        c(wgen_mc$gws.stat[x1:x2, 'Q025'],
+          rev(wgen_mc$gws.stat[x1:x2, 'Q975'])),
+        col="grey")
+lines(wgen_wave$period, wgen_wave$gws)
+lines(wgen_wave$period, wgen_mc$gws.stat[x1:x2, 'MEAN'], lty=2, col="blue")
+lines(wgen_wave$period, wgen_wave$gws.sig$signif, col="red", lty=3)
+
+boxplot(colMeans(wgen_mc$x), main="Mean")
+points(mean(clim.wyr$PRCP),col="red",pch=19)
+points(mean(colMeans(wgen_mc$x)), col="blue", pch=19)
+
+boxplot(apply(wgen_mc$x, 2, sd), main="Standard Deviation")
+points(sd(clim.wyr$PRCP), col="red", pch=19)
+points(mean(apply(wgen_mc$x, 2, sd)), col="blue", pch=19)
+
+boxplot(apply(wgen_mc$x, 2, skewness), main="Skew")
+points(skewness(clim.wyr$PRCP), col="red", pch=19)
+points(mean(apply(wgen_mc$x, 2, skewness)),col="blue",pch=19)
+```
+
+The figure above shows the distributions of power, mean, standard deviation and skewness for the monte carlo simulations of the arima models. The GWS power for the historical data is the black line, the mean GWS power for the arima models is the blue line, and the significance thresholds is the red line. The shaded area is the 2.5-97.5% confidence interval of the simulated GWS power. 
+
+The boxplots are the distributions of the three statistics for the monte carlo simulations, the red dot is the statistic of the historical timeseries, and the blue dot is the mean statistic for the simulated timeseries.
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```
+
