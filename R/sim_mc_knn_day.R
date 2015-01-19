@@ -5,8 +5,11 @@
 #' @param states character list of markov states
 #' @param transitions list of monthly transition matrices generated with mc_fit()
 #' @param start_month first month of the water year
+#' @param start_water_year initial water year of simulation
+#' @param include_leap_days include leap days in simulation time series
 #' @export
-sim_mc_knn_day <- function(n_year, historical, states, transitions, start_month=10) {
+sim_mc_knn_day <- function(n_year, historical, states, transitions,
+                           start_month=10, start_water_year=2000, include_leap_days=FALSE) {
   historical_stats <- dplyr::select(historical, MONTH, PRCP, TMAX, TMIN, TEMP)
   historical_stats <- tidyr::gather(historical_stats, VAR, VALUE, PRCP:TEMP)
   historical_stats <- plyr::dlply(historical_stats, c("VAR"), function(x) {
@@ -15,7 +18,12 @@ sim_mc_knn_day <- function(n_year, historical, states, transitions, start_month=
     })
   })
 
-  sim <- .createSim(n_year=n_year, start_month=start_month)
+  sim_dates <- wyear_date_range(n_year = n_year, start_month = start_month,
+                                start_water_year = start_water_year, include_leap_days = include_leap_days)
+  sim <- data.frame(SIM_YEAR=rep(seq(from=1, to=n_year, by=1), each=365),
+                    DATE=sim_dates,
+                    MONTH=lubridate::month(sim_dates),
+                    WDAY=rep(1:365, times=n_year))
 
   # pick random initial condition from historical dataset
   initial <- sample(which(historical$WDAY==sim[[1, 'WDAY']]), size=1)
@@ -27,14 +35,14 @@ sim_mc_knn_day <- function(n_year, historical, states, transitions, start_month=
   sim[1, 'TMAX'] <- historical[[initial, 'TMAX']]
 
   # run markov chain simulation
-  sim$STATE <- mc_sim(months=lubridate::month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transition=transitions)
+  sim$STATE <- mc_simulate(months=lubridate::month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transition=transitions)
 
   for (i in 2:nrow(sim)) {
     m <- sim[i, 'MONTH']
-    selected <- select_knn_day(wday=sim[[i, 'WDAY']], state=sim[[i, 'STATE']], state_prev=sim[[i-1, 'STATE']],
-                               prcp_prev=sim[[i-1, 'PRCP']], temp_prev=sim[[i-1, 'TEMP']],
-                               prcp_sd=historical_stats[['PRCP']][[m]][['SD']], temp_sd=historical_stats[['TEMP']][[m]][['SD']],
-                               historical=historical)
+    selected <- knn_daily(wday=sim[[i, 'WDAY']], state=sim[[i, 'STATE']], state_prev=sim[[i-1, 'STATE']],
+                          prcp_prev=sim[[i-1, 'PRCP']], temp_prev=sim[[i-1, 'TEMP']],
+                          prcp_sd=historical_stats[['PRCP']][[m]][['SD']], temp_sd=historical_stats[['TEMP']][[m]][['SD']],
+                          historical=historical)
 
     sim[i, 'SAMPLE_DATE'] <- selected[[1, 'DATE']]
     sim[i, 'PRCP'] <- selected[[1, 'PRCP']]

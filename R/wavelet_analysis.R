@@ -5,7 +5,7 @@
 #' @param noise.type type of background noise ("white" or "red")
 #' @export
 #' @examples
-#' wavelet_analysis(x=runif(30)*100+200, sig=0.90, noise.type="white", plot.flag=TRUE)
+#' wavelet_analysis(x=runif(30)*100+200, sig=0.90, noise.type="white")
 #'
 wavelet_analysis <- function(x, sig.level=0.90, noise.type=c("white", "red")) {
   noise.type <- match.arg(noise.type)

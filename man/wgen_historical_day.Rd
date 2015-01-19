@@ -4,7 +4,8 @@
 \alias{wgen_historical_day}
 \title{Run Daily Weather Generator using Historical Data}
 \usage{
-wgen_historical_day(historical, n_year, start_month = 10)
+wgen_historical_day(historical, n_year, start_month = 10,
+  start_water_year = 2000, include_leap_days = FALSE)
 }
 \arguments{
 \item{historical}{historical climate dataframe}
@@ -12,6 +13,10 @@ wgen_historical_day(historical, n_year, start_month = 10)
 \item{n_year}{number of simulation years}
 
 \item{start_month}{initial month of the water year}
+
+\item{start_water_year}{initial water year of simulation}
+
+\item{include_leap_days}{include leap days in simulation time series}
 }
 \description{
 Run Daily Weather Generator using Historical Data

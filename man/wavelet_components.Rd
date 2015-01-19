@@ -16,8 +16,6 @@ wavelet_components(x, wt, n.periods, sig.periods, n.comp.periods)
 \item{sig.periods}{integer array of significance periods}
 
 \item{n.comp.periods}{number of significance periods for each composite period}
-
-\item{plot_flag}{boolean flag to show plots}
 }
 \description{
 Reconstruct Wavelet Components from Wavelet Transform

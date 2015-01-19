@@ -1,7 +1,7 @@
 #' Simulate Annual Timeseries with ARIMA Model
 #'
 #' @param x vector of observed annual values
-#' @param start_year first simulation year
+#' @param start_water_year first simulation water year
 #' @param n_year number of simulation years
 #' @export
 #' @return list containing ARIMA model, observed values, and simulated values as zoo object

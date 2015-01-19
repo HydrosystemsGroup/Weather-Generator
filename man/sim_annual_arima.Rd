@@ -9,9 +9,9 @@ sim_annual_arima(x, start_water_year = 2000, n_year = 10)
 \arguments{
 \item{x}{vector of observed annual values}
 
-\item{n_year}{number of simulation years}
+\item{start_water_year}{first simulation water year}
 
-\item{start_year}{first simulation year}
+\item{n_year}{number of simulation years}
 }
 \value{
 list containing ARIMA model, observed values, and simulated values as zoo object

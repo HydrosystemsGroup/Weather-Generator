@@ -17,6 +17,6 @@ wavelet_analysis(x, sig.level = 0.9, noise.type = c("white", "red"))
 Wavelet Analysis of Annual Timeseries
 }
 \examples{
-wavelet_analysis(x=runif(30)*100+200, sig=0.90, noise.type="white", plot.flag=TRUE)
+wavelet_analysis(x=runif(30)*100+200, sig=0.90, noise.type="white")
 }
 

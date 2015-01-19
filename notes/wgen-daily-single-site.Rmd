@@ -1,5 +1,5 @@
 ---
-title: "Daily Weather Generator for Single Site"
+title: "Daily Weather Generator for a Single Site"
 author: "Jeffrey D Walker, PhD"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output: html_document
@@ -13,6 +13,7 @@ library(lubridate)
 library(tidyr)
 library(ggplot2)
 library(gridExtra)
+library(moments)
 library(weathergen)
 theme_set(theme_bw())
 
@@ -21,6 +22,8 @@ start_month <- 10
 
 # Load Historical Data
 
+First, load the historical daily climate data for Boston, MA from the `climate_cities` dataset included in `weathergen`.
+
 ```{r load-obs}
 data(climate_cities)
 obs_day <- climate_cities[['boston']]
@@ -28,10 +31,12 @@ obs_day <- climate_cities[['boston']]
 obs_day <- obs_day[weathergen::complete_water_years(obs_day$DATE),]
 obs_day['WYEAR'] <- wyear(obs_day[['DATE']], start_month=start_month)
 obs_day['MONTH'] <- month(obs_day[['DATE']])
-obs_day <- obs_day[, c('WYEAR', 'MONTH', 'DATE', 'PRCP', 'TMIN', 'TMAX', 'WIND')]
+obs_day['TEMP'] <- (obs_day['TMIN'] + obs_day['TMAX'])/2
+obs_day <- obs_day[, c('WYEAR', 'MONTH', 'DATE', 'PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')]
 
 obs_wyr <- group_by(obs_day, WYEAR) %>%
   summarise(PRCP=sum(PRCP),
+            TEMP=mean(TEMP),
             TMIN=mean(TMIN),
             TMAX=mean(TMAX),
             WIND=mean(WIND))
@@ -41,7 +46,7 @@ obs <- list(day=obs_day, wyr=obs_wyr)
 summary(obs[['day']])
 ```
 
-This figure shows the timeseries of each variable.
+This figure shows daily timeseries of each climate variable for Boston, MA.
 
 ```{r plot-obs-da, fig.height=8, fig.width=6, echo=FALSE}
 gather(obs[['day']], VAR, VALUE, PRCP:WIND) %>%
@@ -70,7 +75,7 @@ In this section, a daily simulation is performed without any adjustment to the s
 ```{r}
 start_water_year <- 2000 # starting water year for simulation
 n_year <- 40             # number of simulation years
-n_annual_knn <- 100      # population size for annual KNN sampling (default)
+n_knn_annual <- 100      # population size for annual KNN sampling (default)
 dry_spell_changes <- 1   # change factor for dry spell (0.8 - 1.2?)
 wet_spell_changes <- 1   # change factor for wet spell (0.8 - 1.2?)
 prcp_mean_changes <- 1   # change factor for mean precipitation (0.8 - 1.2?)
@@ -82,12 +87,25 @@ temp_changes <- 0        # additive factor for temperature variables (-10 - 10)
 
 A sequence of annual precipitation values are simulated using the `wgen_annual_arima()` function. This function first fits an ARIMA model to the historical annual precipitation. The ARIMA model is then used to generate a simulation of annual precipitation for length `n_year`. The `wgen_annual_arima()` function returns a list of length 3 containing the ARIMA model object (`model`), the historical annual precipitation (`observed`), and the simulated annual precipitation (`values`). 
 
-```{r}
+```{r sim-annual}
 sim_annual_prcp <- sim_annual_arima(x = obs[['wyr']][['PRCP']], start_water_year = start_water_year, n_year = n_year)
 str(sim_annual_prcp, max.level=1)
 ```
 
-```{r, eval=FALSE}
+```{r plot-sim-annual}
+data.frame(WYEAR=time(sim_annual_prcp[['sim']]),
+           PRCP=zoo::coredata(sim_annual_prcp[['sim']])) %>%
+  ggplot(aes(WYEAR, PRCP)) +
+  geom_line() +
+  geom_hline(yint=mean(obs[['wyr']][['PRCP']]), color='red') +
+  geom_text(aes(label=TEXT), data=data.frame(WYEAR=2000, PRCP=mean(obs[['wyr']][['PRCP']]), TEXT="Historical Mean"),
+            hjust=0, vjust=-1, color='red') +
+  labs(x="Simulation Water Year", y="Annual Precip (mm/yr)")
+```
+
+Monte Carlo simulation to compare mean/sd/skew of simulated vs historical (blue point) annual precipitation timeseries.
+
+```{r plot-annual-mc}
 # batch simulation to compare mean/sd/skew
 z <- lapply(1:50, function(i) { 
     sim_annual_arima(x = obs[['wyr']][['PRCP']], start_water_year = start_water_year, n_year = n_year)$sim
@@ -106,29 +124,62 @@ do.call(merge, z) %>%
              data=data.frame(stat=c('mean', 'sd', 'skew'), 
                              value=c(mean(obs[['wyr']][['PRCP']]), sd(obs[['wyr']][['PRCP']]), skewness(obs[['wyr']][['PRCP']]))), 
              size=4, color='deepskyblue') +
+  labs(x='', y='') +
   facet_wrap(~stat, scales='free')
 ```
 
 ## Daily Precipitation Simulation
 
-The annual precipitation generated in the previous step is then used to drive a daily simulation. For each year, a k-nearest neighbors algorithm is used to sample `n_annual_knn` years from the historical record with replacement. A Markov Chain model is then fitted to the historical
+The annual precipitation generated in the previous step is then used to drive a daily simulation. For each year, a k-nearest neighbors algorithm is used to sample `n_knn_annual` years from the historical record with replacement. A Markov Chain model is then fitted to the sampled historical years and used to simulate a sequence of states for each simulation year. Finally, the simulated states are used to sample the historical daily values using a daily KNN algorithm.
 
-```{r, eval=FALSE}
-sim_da <- wgen_daily_from_annual(prcp_yr = sim_annual_prcp$sim,
-                                 obs_prcp_yr = zoo(x = obs[['wyr']][['PRCP']], order.by = obs[['wyr']][['WYEAR']]),
-                                 obs_day = zoo(x = obs[['day']][, c('PRCP', 'TMIN', 'TMAX', 'WIND')], order.by = obs[['day']][['DATE']]),
-                                 start_month = start_month,
-                                 n = n_annual_knn)
+```{r sim-day}
+sim_da <- sim_daily_from_annual(prcp_yr = sim_annual_prcp[['sim']],
+                                obs_da = zoo(x = obs[['day']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
+                                             order.by = obs[['day']][['DATE']]),
+                                obs_prcp_yr = zoo(x = obs[['wyr']][['PRCP']], order.by = obs[['wyr']][['WYEAR']]),
+                                start_month = start_month,
+                                n_knn_annual = n_knn_annual)
 ```
 
+```{r plot-sim-day}
+select(sim_da, DATE, PRCP, TEMP, TMIN, TMAX) %>%
+  gather(VAR, VALUE, PRCP:TMAX) %>%
+  ggplot(aes(DATE, VALUE)) +
+  geom_line() +
+  facet_wrap(~VAR, scales='free_y')
+```
 
+Adjust daily simulated precipitation to match annual simulated precipitation.
 
-```{r, eval=FALSE}
-annual_sum_adjustment <- adjust_daily_to_annual(x_day=sim_da[['PRCP']], years_day=sim_da[['SIM_YEAR']], 
-                                                x_yr=sim_yr$values, years_yr=seq(1, length(sim_yr$values)), 
+```{r adj-sim-day}
+sim_da_unadj <- select(sim_da, DATE, PRCP)
+annual_sum_adjustment <- adjust_daily_to_annual(values_day=sim_da[['PRCP']], 
+                                                years_day=wyear(sim_da[['DATE']], start_month = start_month), 
+                                                values_yr=coredata(sim_annual_prcp[['sim']]), 
+                                                years_yr=time(sim_annual_prcp[['sim']]), 
                                                 min_ratio=0.9, max_ratio=1.1)
 sim_da[, 'PRCP'] <- annual_sum_adjustment$adjusted
+```
 
+Compare the annual precip sum
+
+```{r plot-sim-day-yr-adj}
+mutate(sim_da_unadj, WYEAR=wyear(DATE, start_month=start_month)) %>%
+  group_by(WYEAR) %>%
+  summarise(PRCP=sum(PRCP)) %>%
+  mutate(SOURCE="Orig Day") %>%
+  rbind(data.frame(WYEAR=time(sim_annual_prcp[['sim']]),
+                   PRCP=coredata(sim_annual_prcp[['sim']]),
+                   SOURCE="Orig Wyr")) %>%
+  rbind(mutate(sim_da, WYEAR=wyear(DATE, start_month=start_month)) %>%
+          group_by(WYEAR) %>%
+          summarise(PRCP=sum(PRCP)) %>%
+          mutate(SOURCE="Adj Day")) %>%
+  ggplot(aes(WYEAR, PRCP, color=SOURCE)) +
+  geom_line()
+```
+
+```{r adj-sim-day-changes}
 # TODO: compute mean_change from transition matrices
 gamma_adjustment <- adjust_daily_gamma(sim_da[['PRCP']], sim_da[['MONTH']], mean_change=prcp_mean_changes, cv_change=prcp_cv_changes)
 sim_da[, 'PRCP'] <- gamma_adjustment$adjusted
@@ -139,6 +190,20 @@ temp_adjustment <- adjust_daily_additive(x = sim_da[['TEMP']], months = sim_da[[
 sim_da[, 'TMIN'] <- tmin_adjustment$adjusted
 sim_da[, 'TMAX'] <- tmax_adjustment$adjusted
 sim_da[, 'TEMP'] <- temp_adjustment$adjusted
+```
+
+
+```{r, eval=FALSE}
+rbind(select(sim_da, DATE, PRCP) %>% mutate(SOURCE="Adj"),
+      select(sim_da_unadj, DATE, PRCP) %>% mutate(SOURCE="Orig")) %>%
+  mutate(WYEAR=wyear(DATE, start_month=start_month)) %>%
+  select(WYEAR, DATE, SOURCE, PRCP) %>%
+  spread(SOURCE, PRCP) %>%
+  mutate(DIFF=Adj-Orig,
+         RATIO=ifelse(Orig==0, NA, Adj/Orig)) %>%
+  ggplot(aes(DATE, RATIO)) +
+  geom_point() +
+  geom_hline(yint=1)
 ```
 
 

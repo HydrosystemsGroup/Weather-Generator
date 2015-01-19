@@ -8,7 +8,7 @@ adjust_daily_additive <- function(x, months, changes=0) {
   stopifnot(length(x)==length(months))
 
   if (length(changes) == 1) {
-    change <- rep(changes, 12)
+    changes <- rep(changes, 12)
   }
   stopifnot(length(changes)==12)
 

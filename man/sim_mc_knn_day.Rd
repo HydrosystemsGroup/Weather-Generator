@@ -4,7 +4,8 @@
 \alias{sim_mc_knn_day}
 \title{Run Daily Simulation using KNN/Markov Chain}
 \usage{
-sim_mc_knn_day(n_year, historical, states, transitions, start_month = 10)
+sim_mc_knn_day(n_year, historical, states, transitions, start_month = 10,
+  start_water_year = 2000, include_leap_days = FALSE)
 }
 \arguments{
 \item{n_year}{number of simulation years}
@@ -16,6 +17,10 @@ sim_mc_knn_day(n_year, historical, states, transitions, start_month = 10)
 \item{transitions}{list of monthly transition matrices generated with mc_fit()}
 
 \item{start_month}{first month of the water year}
+
+\item{start_water_year}{initial water year of simulation}
+
+\item{include_leap_days}{include leap days in simulation time series}
 }
 \description{
 Run Daily Simulation using KNN/Markov Chain

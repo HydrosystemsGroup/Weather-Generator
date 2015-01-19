@@ -4,14 +4,14 @@
 \alias{arimas_simulate}
 \title{Run simulations of multiple arima models}
 \usage{
-arimas_simulate(models, n, components = TRUE)
+arimas_simulate(models, n, return_components = TRUE)
 }
 \arguments{
 \item{models}{list of arima model objects (e.g. noise and wavelet components)}
 
 \item{n}{number of simulation timesteps}
 
-\item{components}{if TRUE returns list containing both the sum and indidividual components, otherwise returns just sum vector}
+\item{return_components}{if TRUE returns list containing both the sum and indidividual components, otherwise returns just sum vector}
 }
 \description{
 Run simulations of multiple arima models

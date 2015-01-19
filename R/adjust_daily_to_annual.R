@@ -1,21 +1,21 @@
 #' Adjust Daily Values to Match Annual Sums
 #'
-#' @param x_day vector of daily values
-#' @param years_day vector of years corresponding to x_day
-#' @param x_yr vector of annual sums
-#' @param years_yr vector of years corresponding to x_yr
+#' @param values_day vector of daily values
+#' @param years_day vector of years corresponding to values_day
+#' @param values_yr vector of annual sums
+#' @param years_yr vector of years corresponding to values_yr
 #' @param min_ratio minimum adjustment ratio
 #' @param max_ratio maximum adjustment ratio
 #' @export
-adjust_daily_to_annual <- function(x_day, years_day, x_yr, years_yr, min_ratio=0.9, max_ratio=1.1) {
-  stopifnot(length(x_day)==length(years_day))
-  stopifnot(length(x_yr)==length(years_yr))
+adjust_daily_to_annual <- function(values_day, years_day, values_yr, years_yr, min_ratio=0.9, max_ratio=1.1) {
+  stopifnot(length(values_day)==length(years_day))
+  stopifnot(length(values_yr)==length(years_yr))
 
   # create data frames
   daily <- data.frame(YEAR=years_day,
-                      VALUE=x_day)
+                      VALUE=values_day)
   annual <- data.frame(YEAR=years_yr,
-                       ANNUAL=x_yr)
+                       ANNUAL=values_yr)
 
   # compute annual sum of daily values
   daily_sum <- dplyr::group_by(daily, YEAR)
@@ -32,6 +32,6 @@ adjust_daily_to_annual <- function(x_day, years_day, x_yr, years_yr, min_ratio=0
   daily <- dplyr::mutate(daily, ADJUSTED=VALUE*RATIO)
 
   list(annual_ratios=annual,
-       original=x_day,
+       original=values_day,
        adjusted=daily[['ADJUSTED']])
 }

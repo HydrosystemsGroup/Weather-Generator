@@ -5,7 +5,6 @@
 #' @param n.periods number of final composite periods
 #' @param sig.periods integer array of significance periods
 #' @param n.comp.periods number of significance periods for each composite period
-#' @param plot_flag boolean flag to show plots
 #' @export
 #' @examples
 #' wavelet_components(x=x, n.periods=1, sig.periods=seq(8,15), n.comp.periods=8)

@@ -16,7 +16,8 @@ Imports:
     dplyr (>= 0.2),
     hydromad,
     forecast,
-    lubridate
+    lubridate,
+    zoo
 Suggests:
     knitr,
     rmarkdown,

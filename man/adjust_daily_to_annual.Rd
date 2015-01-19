@@ -4,17 +4,17 @@
 \alias{adjust_daily_to_annual}
 \title{Adjust Daily Values to Match Annual Sums}
 \usage{
-adjust_daily_to_annual(x_day, years_day, x_yr, years_yr, min_ratio = 0.9,
-  max_ratio = 1.1)
+adjust_daily_to_annual(values_day, years_day, values_yr, years_yr,
+  min_ratio = 0.9, max_ratio = 1.1)
 }
 \arguments{
-\item{x_day}{vector of daily values}
+\item{values_day}{vector of daily values}
 
-\item{years_day}{vector of years corresponding to x_day}
+\item{years_day}{vector of years corresponding to values_day}
 
-\item{x_yr}{vector of annual sums}
+\item{values_yr}{vector of annual sums}
 
-\item{years_yr}{vector of years corresponding to x_yr}
+\item{years_yr}{vector of years corresponding to values_yr}
 
 \item{min_ratio}{minimum adjustment ratio}
 
