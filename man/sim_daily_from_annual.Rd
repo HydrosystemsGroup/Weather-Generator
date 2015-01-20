@@ -2,28 +2,41 @@
 % Please edit documentation in R/sim_daily_from_annual.R
 \name{sim_daily_from_annual}
 \alias{sim_daily_from_annual}
-\title{Simulate Daily Weather from Simulated Annual Precipitation}
+\title{Daily Weather Generator Conditioned on Simulated Annual Precipitation}
 \usage{
-sim_daily_from_annual(prcp_yr, obs_da, obs_prcp_yr, start_month = 10,
-  include_leap_days = FALSE, n_knn_annual = 100)
+sim_daily_from_annual(prcp_yr, obs_day, obs_prcp_yr, start_month = 10,
+  include_leap_days = FALSE, n_knn_annual = 100, dry_wet_threshold = 0.3,
+  wet_extreme_quantile_threshold = 0.8, adjust_annual_precip = TRUE,
+  annual_precip_adjust_limits = c(0.9, 1.1), dry_spell_changes = 1,
+  wet_spell_changes = 1, prcp_mean_changes = 1, prcp_cv_changes = 1,
+  temp_changes = 0)
 }
 \arguments{
-\item{prcp_yr}{vector of target annual precipitation}
+\item{prcp_yr}{simulated annual precipitation as \code{zoo} object}
 
-\item{obs_da}{data frame of daily observed weather}
+\item{obs_day}{observed daily weather as multi-column \code{zoo} object}
 
-\item{obs_prcp_yr}{vector of observed annual precipitation}
+\item{obs_prcp_yr}{observed annual precipitation as numeric vector}
 
 \item{start_month}{first month of the water year}
 
 \item{include_leap_days}{boolean flag to include leap days (default=FALSE)}
 
-\item{n_knn_annual}{number of years for annual KNN sampling}
+\item{n_knn_annual}{number of years used for annual KNN sampling}
+
+\item{dry_wet_threshold}{threshold precipitation amount for dry/wet states}
+
+\item{wet_extreme_quantile_threshold}{threshold quantile for wet/extreme states}
 }
 \value{
-vector of sampled years of length n
+a named list containing:
+\item{\code{x}}{the historical dataset used to train the simulation}
+\item{\code{state_thresholds}}{monthly precipitation thresholds for defining Markov states based on the historical dataset}
+\item{\code{transition_matrices}}{monthly transition matrices based on the historical dataset}
+\item{\code{state_equilibria}}{monthly state equilibria probabilities}
+\item{\code{out}}{a data frame of the simulated daily weather}
 }
 \description{
-Simulate Daily Weather from Simulated Annual Precipitation
+Given a timeseries of simulated annual precipitation, simulate daily weather using the KNN and Markov Chain method.
 }
 

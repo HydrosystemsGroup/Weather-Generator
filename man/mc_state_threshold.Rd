@@ -4,16 +4,20 @@
 \alias{mc_state_threshold}
 \title{Determine Markov State Thresholds from Precipitation}
 \usage{
-mc_state_threshold(prcp, months, dry_wet = 0.3, wet_extreme_quantile = 0.8)
+mc_state_threshold(x, months, dry_wet_threshold = 0.3,
+  wet_extreme_quantile_threshold = 0.8)
 }
 \arguments{
-\item{prcp}{vector of daily precipitation}
+\item{x}{vector of daily precipitation}
 
-\item{months}{vector of months corresponding to daily precipitation}
+\item{months}{vector of months corresponding to daily precipitation vector \code{x}}
 
-\item{dry_wet}{threshold precipitation amount for dry/wet states}
+\item{dry_wet_threshold}{threshold precipitation amount for dry/wet states}
 
-\item{wet_extreme_quantile}{threshold quantile for wet/extreme states}
+\item{wet_extreme_quantile_threshold}{threshold quantile for wet/extreme states}
+}
+\value{
+monthly list of precipitation thresholds as vectors of length 2 (first element is threshold amount between dry/wet, second element is threshold amount between wet/extreme)
 }
 \description{
 Determine Markov State Thresholds from Precipitation

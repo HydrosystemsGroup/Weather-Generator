@@ -10,5 +10,5 @@ mc_state_equilibrium <- function(m) {
   eig <- eigen(t(m))$vectors[,1]
   eig <- eig/sum(eig)
   names(eig) <- rownames(m)
-  eig
+  Re(eig)
 }

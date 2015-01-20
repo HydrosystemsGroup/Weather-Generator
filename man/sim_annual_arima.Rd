@@ -4,19 +4,25 @@
 \alias{sim_annual_arima}
 \title{Simulate Annual Timeseries with ARIMA Model}
 \usage{
-sim_annual_arima(x, start_water_year = 2000, n_year = 10)
+sim_annual_arima(x, start_year = 2000, n_year = 10)
 }
 \arguments{
 \item{x}{vector of observed annual values}
 
-\item{start_water_year}{first simulation water year}
+\item{start_year}{first simulation year}
 
 \item{n_year}{number of simulation years}
 }
 \value{
-list containing ARIMA model, observed values, and simulated values as zoo object
+a named list containing:
+\item{\code{model}}{the fitted arima model returned by \code{forecast::auto.arima()}}
+\item{\code{x}}{the historical annual precipitation as a numeric vector}
+\item{\code{out}}{the simulated annual precipitation of length \code{n_year} as a \code{zoo} object}
 }
 \description{
-Simulate Annual Timeseries with ARIMA Model
+Fit an ARIMA model to a given vector of annual precipitation \code{x}, and run a simulation of length \code{n_year} beginning with year \code{start_year}.
+}
+\examples{
+sim_annual_arima(rnorm(100))
 }
 

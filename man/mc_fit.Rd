@@ -11,6 +11,9 @@ mc_fit(states, months)
 
 \item{months}{numeric array of months for each daily time step}
 }
+\value{
+monthly list of transition matrices
+}
 \description{
 Fit Markov Chain Transition Matrices to State Sequence
 }

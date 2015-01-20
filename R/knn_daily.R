@@ -45,7 +45,7 @@ knn_daily <- function(wday, state, state_prev, prcp_prev, temp_prev, prcp_sd, te
 
   stopifnot(nrow(current)>0)
   stopifnot(all(current$STATE == state))
-  stopifnot(all(current$STATE_PREV == state_prev))
+#   stopifnot(all(current$STATE_PREV == state_prev))
 
   k <- round(sqrt(nrow(current)))
 
