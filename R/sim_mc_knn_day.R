@@ -27,7 +27,7 @@ sim_mc_knn_day <- function(n_year, historical, states, transitions,
 
   # pick random initial condition from historical dataset
   initial <- sample(which(historical$WDAY==sim[[1, 'WDAY']]), size=1)
-  sim[1, 'SAMPLE_DATE'] <- historical[[initial, 'DATE']]
+  sim[1, 'SAMPLE_DATE'] <- format(historical[[initial, 'DATE']], "%Y-%m-%d")
   sim[1, 'STATE'] <- as.character(historical[[initial, 'STATE']])
   sim[1, 'PRCP'] <- historical[[initial, 'PRCP']]
   sim[1, 'TEMP'] <- historical[[initial, 'TEMP']]
@@ -44,13 +44,13 @@ sim_mc_knn_day <- function(n_year, historical, states, transitions,
                           prcp_sd=historical_stats[['PRCP']][[m]][['SD']], temp_sd=historical_stats[['TEMP']][[m]][['SD']],
                           historical=historical)
 
-    sim[i, 'SAMPLE_DATE'] <- selected[[1, 'DATE']]
+    sim[i, 'SAMPLE_DATE'] <- format(selected[[1, 'DATE']], "%Y-%m-%d")
     sim[i, 'PRCP'] <- selected[[1, 'PRCP']]
     sim[i, 'TEMP'] <- selected[[1, 'TEMP']]
     sim[i, 'TMIN'] <- selected[[1, 'TMIN']]
     sim[i, 'TMAX'] <- selected[[1, 'TMAX']]
   }
-  sim$SAMPLE_DATE <- as.Date(sim$SAMPLE_DATE, origin='1970-01-01')
+  sim$SAMPLE_DATE <- ymd(sim$SAMPLE_DATE)
 
   sim
 }
