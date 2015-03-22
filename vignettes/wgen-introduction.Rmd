@@ -7,6 +7,10 @@ output:
     number_sections: yes
     toc: yes
     toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Introduction to the weathergen Package}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
 ---
 
 # Introduction
@@ -15,7 +19,7 @@ This document provides an introduction to the `weathergen` R package. This packa
 
 > Steinschneider, S., & Brown, C. (2013). A semiparametric multivariate, multisite weather generator with low-frequency variability for use in climate risk assessments. Water Resources Research, 49(11), 7205–7220. doi:10.1002/wrcr.20528
 
-The code in this package is based on the original scripts written by Scott Steinschneider.
+The code in this package is based on the original scripts written by Scott Steinschneider, PhD and modified by Jeffrey D Walker, PhD.
 
 In order to run the code below, a few packages must be loaded first.
 
