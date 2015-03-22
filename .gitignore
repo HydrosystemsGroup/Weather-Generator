@@ -5,3 +5,5 @@ ggmapTemp.png
 inst/doc
 scripts/maurer/data
 scripts/maurer/db
+.build.timestamp
+*.knit.md
