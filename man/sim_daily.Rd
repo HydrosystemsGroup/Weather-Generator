@@ -7,9 +7,7 @@
 sim_daily(historical, n_year, dry_wet_threshold = 0.3,
   wet_extreme_quantile_threshold = 0.8, start_month = 10,
   start_water_year = 2000, include_leap_days = FALSE,
-  adjust_annual_precip = TRUE, annual_precip_adjust_limits = c(0.9, 1.1),
-  dry_spell_changes = 1, wet_spell_changes = 1, prcp_mean_changes = 1,
-  prcp_cv_changes = 1, temp_changes = 0)
+  dry_spell_changes = 1, wet_spell_changes = 1)
 }
 \arguments{
 \item{historical}{historical climate dataframe}

@@ -9,7 +9,7 @@ sim_daily_from_annual(prcp_yr, obs_day, obs_prcp_yr, start_month = 10,
   wet_extreme_quantile_threshold = 0.8, adjust_annual_precip = TRUE,
   annual_precip_adjust_limits = c(0.9, 1.1), dry_spell_changes = 1,
   wet_spell_changes = 1, prcp_mean_changes = 1, prcp_cv_changes = 1,
-  temp_changes = 0)
+  temp_mean_changes = 0)
 }
 \arguments{
 \item{prcp_yr}{simulated annual precipitation as \code{zoo} object}
@@ -30,7 +30,7 @@ sim_daily_from_annual(prcp_yr, obs_day, obs_prcp_yr, start_month = 10,
 }
 \value{
 a named list containing:
-\item{\code{x}}{the historical dataset used to train the simulation}
+\item{\code{obs}}{the historical observation dataset used to train the simulation}
 \item{\code{state_thresholds}}{monthly precipitation thresholds for defining Markov states based on the historical dataset}
 \item{\code{transition_matrices}}{monthly transition matrices based on the historical dataset}
 \item{\code{state_equilibria}}{monthly state equilibria probabilities}

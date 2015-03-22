@@ -1,25 +1,32 @@
 #' Run Daily Weather Simulation
 #'
-#' @param historical historical climate dataframe
+#' @param x daily historical observation dataset as \code{zoo} object with variables PRCP, TEMP, TMIN, TMAX, WIND
 #' @param n_year number of simulation years
-#' @param dry_wet_threshold threshold precipitation amount for dry/wet states
-#' @param wet_extreme_quantile_threshold threshold quantile for wet/extreme states
 #' @param start_month initial month of the water year
 #' @param start_water_year initial water year of simulation
 #' @param include_leap_days include leap days in simulation time series
+#' @param n_knn_annual number of years used in knn sampling algorithm
+#' @param dry_wet_threshold threshold precipitation amount for dry/wet states
+#' @param wet_extreme_quantile_threshold threshold quantile for wet/extreme states
+#' @param adjust_annual_precip
+#' @param annual_precip_adjust_limits
+#' @param dry_spell_changes
+#' @param wet_spell_changes
+#' @param prcp_mean_changes
+#' @param prcp_cv_changes
+#' @param temp_mean_changes
 #' @return a named list containing:
-#' \item{\code{x}}{the historical dataset used to train the simulation}
+#' \item{\code{obs}}{the historical observation dataset used to train the simulation}
 #' \item{\code{state_thresholds}}{monthly precipitation thresholds for defining Markov states based on the historical dataset}
 #' \item{\code{transition_matrices}}{monthly transition matrices based on the historical dataset}
 #' \item{\code{state_equilibria}}{monthly state equilibria probabilities}
 #' \item{\code{sim}}{a data frame of the simulated daily weather}
 #' @export
-wgen_daily <- function(obs_day, n_year, n_knn_annual=100,
-                       dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8,
-                       start_month=10, start_water_year=2000, include_leap_days=FALSE,
+wgen_daily <- function(obs_day, n_year, start_month=10, start_water_year=2000, include_leap_days=FALSE,
+                       n_knn_annual=100, dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8,
                        adjust_annual_precip=TRUE, annual_precip_adjust_limits=c(0.9, 1.1),
                        dry_spell_changes=1, wet_spell_changes=1,
-                       prcp_mean_changes=1, prcp_cv_changes=1, temp_changes=0) {
+                       prcp_mean_changes=1, prcp_cv_changes=1, temp_mean_changes=0) {
   stopifnot(length(intersect(names(obs_day), c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')))==5)
 
   require('zoo')
@@ -54,5 +61,6 @@ wgen_daily <- function(obs_day, n_year, n_knn_annual=100,
                                    wet_spell_changes=wet_spell_changes,
                                    prcp_mean_changes=prcp_mean_changes,
                                    prcp_cv_changes=prcp_cv_changes,
-                                   temp_changes=temp_changes)
+                                   temp_mean_changes=temp_mean_changes)
+  sim_day
 }

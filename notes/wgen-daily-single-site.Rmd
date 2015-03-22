@@ -1,13 +1,25 @@
 ---
-title: "Daily Weather Generator for a Single Site"
+title: "Introduction to the weathergen Package"
 author: "Jeffrey D Walker, PhD"
-date: "`r format(Sys.Date(), '%B %d, %Y')`"
-output: html_document
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
 ---
 
-This document shows how to use the daily weather generator for a single site.
+# Introduction
 
-```{r libraries, echo=FALSE, message=FALSE}
+This document provides an introduction to the `weathergen` R package. This package provides functions for generating synthetic weather data using the method described by Steinschneider and Brown (2013):
+
+> Steinschneider, S., & Brown, C. (2013). A semiparametric multivariate, multisite weather generator with low-frequency variability for use in climate risk assessments. Water Resources Research, 49(11), 7205–7220. doi:10.1002/wrcr.20528
+
+The code in this package is based on the original scripts written by Scott Steinschneider.
+
+In order to run the code below, a few packages must be loaded first.
+
+```{r libraries, message=FALSE}
 library(dplyr)
 library(lubridate)
 library(tidyr)
@@ -18,25 +30,32 @@ library(moments)
 library(weathergen)
 theme_set(theme_bw())
 
-# initial month of the water year
-start_month <- 10
+# set random seed for reproducibility
+set.seed(1)
 ```
 
 # Load Historical Data
 
-First, load the historical daily climate data for Boston, MA from the `climate_cities` dataset included in `weathergen`.
+The `weathergen` package includes a dataset of historical climate data for three cities in the Northeast US. These datasets are provided in the `climate_cities` dataset, which is a list containing dataframes for 3 cities: Boston, Providence, and Worcester:
+
+```{r load-climate-cities}
+data(climate_cities)
+str(climate_cities)
+```
+
+For this vignette, we will use the dataset for Boston, MA. 
 
 ```{r load-obs}
-data(climate_cities)
+# extract dataset for boston
 obs_day <- climate_cities[['boston']]
 
-# subset complete water years
+# subset complete water years using complete_water_years() function
 obs_day <- obs_day[complete_water_years(obs_day$DATE),]
 
 obs_day <- mutate(obs_day,
-                  WYEAR=wyear(DATE, start_month=start_month),
-                  MONTH=month(DATE),
-                  TEMP=(TMIN+TMAX)/2) %>%
+                  WYEAR=wyear(DATE, start_month=10), # extract water year
+                  MONTH=month(DATE),                 # extract month
+                  TEMP=(TMIN+TMAX)/2) %>%            # compute mean temperature
   select(WYEAR, MONTH, DATE, PRCP, TEMP, TMIN, TMAX, WIND)
 
 # compute annual timeseries by water year
@@ -47,14 +66,16 @@ obs_wyr <- group_by(obs_day, WYEAR) %>%
             TMAX=mean(TMAX),
             WIND=mean(WIND))
 
+# save the daily and annual timeseries to a list
 obs <- list(day=obs_day, wyr=obs_wyr)
 
+# summary of the daily timeseries
 summary(obs[['day']])
 ```
 
-This figure shows daily timeseries of each climate variable for Boston, MA.
+This figure shows the daily timeseries of each climate variable.
 
-```{r plot-obs-da, fig.height=8, fig.width=6, echo=FALSE}
+```{r plot-obs-da, fig.height=8, fig.width=10}
 gather(obs[['day']], VAR, VALUE, PRCP:WIND) %>%
   ggplot(aes(DATE, VALUE)) +
   geom_line() +
@@ -64,7 +85,7 @@ gather(obs[['day']], VAR, VALUE, PRCP:WIND) %>%
 
 This figure shows the annual sum of precipitation, and means of minimum temperature, maximum temperature, and wind speed by water year. 
 
-```{r plot-obs-wyr, fig.height=8, fig.width=6, echo=FALSE}
+```{r plot-obs-wyr, fig.height=8, fig.width=10}
 gather(obs[['wyr']], VAR, VALUE, PRCP:WIND) %>%
   ggplot(aes(WYEAR, VALUE)) +
     geom_line() +
@@ -74,49 +95,172 @@ gather(obs[['wyr']], VAR, VALUE, PRCP:WIND) %>%
 
 # Daily Weather Generator
 
-The daily weather generator is `wgen_daily()`. The following section will walk through this function, step-by-step.
+The primary function for running the daily weather generator on a single site is `wgen_daily()`. The function then depends on a number of other functions, which are described in the next section.
+
+The first argument to `wgen_daily()` is the daily timeseries of historical climate variables. This argument must be provided as a `zoo` object which is designed to store regular and irregular timeseries (see the `zoo` package [homepage](http://cran.r-project.org/web/packages/zoo/index.html) for more details).
+
+This code converts the daily timeseries (currently in `obs[['day']]`) to a zoo object. The first argument provides the values of each variable, the second argument provides the associated dates.
+
+```{r create-zoo}
+zoo_day <- zoo(x = obs[['day']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
+             order.by = obs[['day']][['DATE']])
+class(zoo_day)
+summary(zoo_day)
+```
+
+The daily historical timeseries is then passed as the first argument to the `wgen_daily()` function. The other arguments specify a number of parameters for the simulation. These parameters include:
+
+- `n_year` - number of simulation years
+- `start_month` - first month of the water year (e.g. 10=October)
+- `start_water_year` - first water year to use for the simulated timeseries
+- `include_leap_days` - boolean flag to include or exclude leap days in the simulation timeseries (currently only allows `FALSE`)
+- `n_knn_annual` - number of years to use in the annual k-nearest neighbors (knn) sampling algorithm
+- `dry_wet_threshold` - daily precipitation threshold between the `dry` and `wet` Markov states
+- `wet_extreme_quantile_threshold` - daily precipitation quantile used as threshold between the `wet` and `extreme` Markov states
+- `adjust_annual_precip` - boolean flag to adjust simulated daily precipitation amounts to match the simulated annual precipitation
+- `annual_precip_adjust_limits` - lower and upper limits for the daily precipitation adjustment factor to match simulated annual precipitation (e.g. `c(0.9, 1.1)` will only adjust daily values between 90-110%)
+- `dry_spell_changes` - adjustment factor for changing the transition probabilities of dry spells
+- `wet_spell_changes` - adjustment factor for changing the transition probabilities of wet spells
+- `prcp_mean_changes` - multiplicative adjustment factor for changing the annual mean precipitation
+- `prcp_cv_changes` - multiplicative adjustment factor for changing the coefficient of variation for precipitation
+- `temp_mean_changes` - additive adjustment factor for changing the annual mean temperature
+
+The last five parameters for assigning adjustment factors can each be either a single number, which is applied to all months, or a vector of length 12 where each value is the change factor for a specific month (starting with January).
 
 ```{r wgen-daily, warning=FALSE}
-sim_da <- wgen_daily(obs_day = zoo(x = obs[['day']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
-                               order.by = obs[['day']][['DATE']]), 
-                     n_year=1, n_knn_annual=100,
-                     dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8,
-                     start_month=10, start_water_year=2000, include_leap_days=FALSE,
-                     adjust_annual_precip=TRUE, annual_precip_adjust_limits=c(0.9, 1.1),
-                     dry_spell_changes=1, wet_spell_changes=1,
-                     prcp_mean_changes=1, prcp_cv_changes=1, temp_changes=0)
-str(sim_da, max=1)
+sim <- wgen_daily(zoo_day, 
+                  n_year=2, 
+                  start_month=10, 
+                  start_water_year=2000, 
+                  include_leap_days=FALSE,
+                  n_knn_annual=100,
+                  dry_wet_threshold=0.3, 
+                  wet_extreme_quantile_threshold=0.8,
+                  adjust_annual_precip=TRUE,
+                  annual_precip_adjust_limits=c(0.9, 1.1),
+                  dry_spell_changes=1,
+                  wet_spell_changes=1,
+                  prcp_mean_changes=1,
+                  prcp_cv_changes=1,
+                  temp_mean_changes=0)
 ```
 
-# Historical Simulation
+The `wgen_daily()` function returns a list object with the following elements:
 
-In this section, a daily simulation is performed without any adjustment to the statistics or behavior of the weather variables.
-
-## Simulation Parameters
-
-The following parameters define the simulation.
-
-```{r set-params}
-start_water_year <- 2000 # starting water year for simulation
-n_year <- 10             # number of simulation years
-n_knn_annual <- 100      # population size for annual KNN sampling (default)
-
-# change factors
-dry_spell_changes <- 1   # change factor for dry spell (0.8 - 1.2?)
-wet_spell_changes <- 1   # change factor for wet spell (0.8 - 1.2?)
-prcp_mean_changes <- 1   # change factor for mean precipitation (0.8 - 1.2?)
-prcp_cv_changes <- 1     # change factor for precipitation coef. of variation (0.8 - 1.2?)
-temp_changes <- 0        # additive factor for temperature variables (-10 - 10)
+```{r str-sim}
+str(sim, max=1)
 ```
+
+The first element, `sim[['obs']]`, is the historical daily timeseries, with additional columns for the water year (`WYEAR`), month (`MONTH`), and Markov state (`d`=Dry, `w`=Wet, `e`=Extreme).
+
+```{r sim-obs}
+head(sim[['obs']])
+```
+
+The second element, `sim[['state_thresholds']]`, is a dataframe with the monthly precipitation thresholds for each Markov state. For example, in June the Markov state on a given day is dry if the precipitation on that day is less than `r sim[['state_thresholds']][6, 'DRY_WET']` mm/day, wet if it is between `r sim[['state_thresholds']][6, 'DRY_WET']` and `r sim[['state_thresholds']][6, 'WET_EXTREME']` mm/day, and extreme if it is greater than `r sim[['state_thresholds']][6, 'WET_EXTREME']` mm/day.
+
+```{r sim-state_thresholds}
+sim[['state_thresholds']]
+```
+
+The third element, `sim[['transition_matrices']]`, is a list of length 12 where each element is the Markov state transition matrix for each month. For example, the transition matrix for June is:
+
+```{r sim-transition_matrices}
+sim[['transition_matrices']][[6]]
+```
+
+The fourth element, `sim[['state_equilibria`]]`, is a list of length 12 where each element is the state equilibrium of each monthly transition matrix. For example, the equilibrium for June is:
+
+```{r sim-state_equilibrium}
+sim[['state_equilibria']][[6]]
+```
+
+The fifth element, `sim[['change_factors']]`, is a list containing the monthly values for each adjustment factor as well as an additional set of adjustments that are computed from the simulated state transitions (`ratio_probability_wet`). Each of these elements will each be a vector of length 12 (even if the corresponding parameter to `wgen_daily()` was a single value, in which case the same value will be used for all months).
+
+```{r sim-change_factors}
+str(sim[['change_factors']])
+```
+
+The last element, `sim[['out']]`, contains the simulated daily timeseries as a dataframe with the following columns:
+
+- `SIM_YEAR` - simulation year starting at 1
+- `DATE` - simulation date (starting on the first day of the `start_month` and `start_water_year` parameters, e.g. 1999-10-01 for water year 2000 starting in month 10 (October))
+- `MONTH` - simulation month
+- `WDAY` - simulation "water day" which is the julian day starting at the beginning of the water year (e.g. water day 1 = Oct 1)
+- `SAMPLE_DATE` - the historical date sampled from the KNN sampling algorithm and used for the each simulation date
+- `STATE` - simulated Markov state
+- `PRCP`, `TEMP`, `TMIN`, `TMAX`, `WIND` - simulated climate variables
+
+```{r sim-out}
+str(sim[['out']])
+```
+
+This figure shows the simulated timeseries for each variable:
+
+```{r sim-out-plot, fig.width=6, fig.height=8}
+select(sim[['out']], DATE, PRCP, TEMP, TMIN, TMAX, WIND) %>%
+  gather(VAR, VALUE, -DATE) %>%
+  ggplot(aes(DATE, VALUE)) +
+  geom_line() +
+  facet_wrap(~VAR, ncol=1, scales='free_y') +
+  labs(x='Simulation Date', y='Simulated Value', title='Simulated Timeseries') +
+  theme_bw()
+```
+
+----
+
+# Algorithm Description
+
+The daily weather generator uses the following algorithm:
+
+- Simulate annual precipitation using an ARMA model (wavelet model coming soon)
+- For each simulation year:
+  - Use KNN sampling to create a historical daily timeseries that only includes only years where annual precipitation is similar to the current simulated annual precipitation
+  - compute the monthly Markov state transition thresholds and assign states to daily timeseries
+  - fit the monthly Markov chain transition probability matrices
+  - adjust the transition matrices based on the dry and wet spell change factors
+  - for each simulation day in the current year, use KNN sampling to sample the synthetic historical daily values based on the state, precipitation and mean temperature of the current and previous days
+- Combine the daily simulation for each year
+- Adjust daily simulated precipitation values for each year to equal the simulated annual values (if `adjust_annual_precip=TRUE`)
+- Adjust daily simulated precipitation values based on the precipitation adjustment factors
+- Adjust daily simulated minimum, maximum and mean temperature based on the temperature adjustment factor
 
 ## Annual Precipitation Simulation
 
-A sequence of annual precipitation values are simulated using the `sim_annual_arima()` function. This function first fits an ARIMA model to the historical annual precipitation. The ARIMA model is then used to generate a simulation of annual precipitation for length `n_year`. The `wgen_annual_arima()` function returns a list of length 3 containing the ARIMA model object (`model`), the historical annual precipitation (`observed`), and the simulated annual precipitation (`values`). 
+the `sim_annual_arima()` function is used to simulate annual precipitation using an ARIMA model. The arguments to this function include:
+
+- `x` - historical annual precipitation as a `zoo` object
+
+function first fits the ARIMA model to the historical annual precipitation. The ARIMA model is then used to generate a simulation of annual precipitation for length `n_year`. The `sim_annual_arma()` function returns a list of length 3 containing the ARIMA model object (`model`), the historical annual precipitation (`observed`), and the simulated annual precipitation (`values`). 
 
 ```{r sim-annual}
-sim_annual_prcp <- sim_annual_arima(x = obs[['wyr']][['PRCP']], start_year = start_water_year, n_year = n_year)
+zoo_precip_wyr <- zoo(obs[['wyr']][['PRCP']], order.by = obs[['wyr']][['WYEAR']])
+sim_annual_prcp <- sim_annual_arima(x = zoo_precip_wyr, start_year = 2000, n_year = 40)
+```
+
+This function returns a list of length 3 containing elements:
+
+- `model` - the ARIMA model object fitted to the historical data
+- `x` - the historical annual precipitation used to fit the model as a `zoo` object
+- `out` - the simulated annual precipitation as a `zoo` object
+
+```{r sim-annual-str}
 str(sim_annual_prcp, max.level=1)
 ```
+
+The `model` element contains an ARIMA model object, which contains the parameters and error statistics of the fitted model:
+
+```{r sim-annual-prcp-model}
+summary(sim_annual_prcp[['model']])
+```
+
+The `out` element is an annual precipitation timeseries as a `zoo` object:
+
+```{r sim-annual-prcp-out}
+sim_annual_prcp[['out']]
+```
+
+This figure plots the simulated annual precipitation and shows the mean annual precipitation based on the historical dataset for reference.
 
 ```{r plot-sim-annual, fig.width=6, fig.height=3}
 data.frame(WYEAR=time(sim_annual_prcp[['out']]),
@@ -126,166 +270,344 @@ data.frame(WYEAR=time(sim_annual_prcp[['out']]),
   geom_hline(yint=mean(obs[['wyr']][['PRCP']]), color='red') +
   geom_text(aes(label=TEXT), data=data.frame(WYEAR=2000, PRCP=mean(obs[['wyr']][['PRCP']]), TEXT="Historical Mean"),
             hjust=0, vjust=-1, color='red') +
-  labs(x="Simulation Water Year", y="Annual Precip (mm/yr)")
+  labs(x="Simulation Water Year", y="Annual Precip (mm/yr)", title="Simulated Annual Precipitation")
 ```
 
-This figures shows a Monte Carlo simulation of the annual precipitation generator comparing mean/sd/skew of the simulated (boxes) and historical (blue point) timeseries.
+To determine whether the annual precipitation generator sufficiently reproduces the statistics of the historical timeseries,  a Monte Carlo simulation is performed for 50 trials using the same historical timeseries. 
 
-```{r plot-annual-mc, fig.width=6, fig.height=3}
+```{r annual-mc}
 # batch simulation to compare mean/sd/skew
-z <- lapply(1:50, function(i) { 
-    sim_annual_arima(x = obs[['wyr']][['PRCP']], start_year = start_water_year, n_year = n_year)[['out']]
+sim_wyr_batch <- lapply(1:50, function(i) { 
+    sim_annual_arima(x = obs[['wyr']][['PRCP']], start_year = 2000, n_year = 20)[['out']]
   }) 
-names(z) <- paste0(seq(1, length(z)))
-
-do.call(merge, z) %>% 
+names(sim_wyr_batch) <- paste0(seq(1, length(sim_wyr_batch)))
+sim_wyr_batch <- do.call(merge, sim_wyr_batch) %>% 
   apply(MARGIN=2, FUN=function(x) { c(mean=mean(x), sd=sd(x), skew=skewness(x))}) %>% 
-  t %>% 
-  as.data.frame %>% 
+  t
+sim_wyr_stats <- rbind(t(colMeans(sim_wyr_batch)),
+                       c(mean=mean(obs[['wyr']][['PRCP']]), 
+                         sd=sd(obs[['wyr']][['PRCP']]), 
+                         skew=skewness(obs[['wyr']][['PRCP']])))
+sim_wyr_stats <- as.data.frame(sim_wyr_stats)
+sim_wyr_stats$dataset <- c('obs', 'sim')
+sim_wyr_stats <- gather(sim_wyr_stats, stat, value, mean, sd, skew)
+```
+
+The following figure shows the distributions of the mean, standard deviation, and skewness statistics over the simulation trials. The overall mean value of each statistic (blue point) is also compared to the statistic value of the historical timeseries (red point). This figure shows that the annual precipitation generator creates simulated timeseries with similar statistics as the historical timeseries.
+
+```{r plot-annual-mc, fig.width=6, fig.height=4}
+as.data.frame(sim_wyr_batch) %>% 
   mutate(trial=row_number()) %>% 
   gather(stat, value, mean:skew) %>% 
   ggplot(aes(x=stat, value)) + 
   geom_boxplot() + 
-  stat_summary(fun.y=mean, geom='point', color='orangered', size=4) +
-  geom_point(aes(x=1, y=value), 
-             data=data.frame(stat=c('mean', 'sd', 'skew'), 
-                             value=c(mean(obs[['wyr']][['PRCP']]), sd(obs[['wyr']][['PRCP']]), skewness(obs[['wyr']][['PRCP']]))), 
-             size=4, color='deepskyblue') +
+  geom_point(aes(x=stat, y=value, color=dataset), data=sim_wyr_stats, size=3) +
+  scale_color_manual('', values=c('sim'='deepskyblue', 'obs'='orangered'),
+                     labels=c('sim'='Mean of Simulated Trials', 'obs'='Mean of Historical')) +
   labs(x='', y='') +
   facet_wrap(~stat, scales='free')
 ```
 
-## Daily Precipitation Simulation
+## Daily Weather Simulation
 
-The annual precipitation generated in the previous step is then used to drive a daily simulation. For each year, a k-nearest neighbors algorithm is used to sample `n_knn_annual` years from the historical record with replacement. A Markov Chain model is then fitted to the sampled historical years and used to simulate a sequence of states for each simulation year. Finally, the simulated states are used to sample the historical daily values using a daily KNN algorithm.
+The annual precipitation generated in the previous step is then used to drive a daily simulation for all weather variables. For each year, a k-nearest neighbors algorithm samples `n_knn_annual` years from the historical record with replacement. The daily historical timeseries for each year is then extracted and combined into a daily timeseries, where the sequence of years is based on the KNN sampling. A Markov Chain model is then fitted to the sampled historical daily and used to simulate a sequence of states for each simulation year. Finally, the simulated states are used to sample the historical daily values using a daily KNN algorithm.
 
-```{r sim-day, warning=FALSE}
-sim_da <- sim_daily_from_annual(prcp_yr = sim_annual_prcp[['out']],
-                                obs_da = zoo(x = obs[['day']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
-                                             order.by = obs[['day']][['DATE']]),
-                                obs_prcp_yr = zoo(x = obs[['wyr']][['PRCP']], order.by = obs[['wyr']][['WYEAR']]),
-                                start_month = start_month, n_knn_annual = n_knn_annual, 
-                                dry_wet_threshold = 0.3, wet_extreme_quantile_threshold = 0.8)
+### KNN Annual Sampling
+
+For each simulation year, a set of `n_knn_annual` years are sampled with replacement from the historical record using inverse distance weighted sampling. Historical years with annual precipitation similar to the current simulated annual precipitation are given a higher weight and thus more likely to be sampled than historical years where the annual precipitation was much higher or lower than the simulated precipitation.
+
+```{r knn_annual}
+n_knn_annual <- 100
+
+# generate vector of sampled years
+sampled_years <- knn_annual(prcp=coredata(sim_annual_prcp[['out']])[1],
+                        obs_prcp=zoo_precip_wyr,
+                        n=n_knn_annual)
+sampled_years
 ```
 
-```{r plot-sim-day, fig.width=8, fig.height=4}
-select(sim_da[['out']], DATE, PRCP, TEMP, TMIN, TMAX) %>%
-  gather(VAR, VALUE, PRCP:TMAX) %>%
+This figure shows the historical annual precipitation for each water year. The red line shows the annual precipitation for the first simulated year. The red points show which historical years were included in the KNN sampling. Note that these points tend to be close to the target simulated precipitation.
+
+```{r plot-knn_annual, fig.width=8, fig.height=4}
+ggplot() +
+  geom_point(aes(WYEAR, PRCP, color=SAMPLED), data=obs[['wyr']] %>% mutate(SAMPLED=WYEAR %in% sampled_years)) +
+  geom_hline(yint=sim_annual_prcp[['out']][1], linetype=2, color='red') +
+  geom_text(aes(x=x, y=y, label=label),
+            data=data.frame(x=min(obs[['wyr']][['WYEAR']]),
+                            y=sim_annual_prcp[['out']][1],
+                            label='Target Simulated Annual Precip'),
+            vjust=-0.5, hjust=0) +
+  scale_color_manual('Sampled in KNN', values=c('TRUE'='orangered', 'FALSE'='grey30')) +
+  labs(x='Water Year', y='Annual Precipitation (mm/yr)')
+```
+
+For each of the sampled years in `sampled_years`, the corresponding daily values are extracted from the historical time series and then combined into a single timeseries. The following figure shows the resulting daily timeseries for the 100 years sampled for the first simulated water year. The points are colored by their historical water year, and thus show years where the historical annual precip is closest to the simulated precip are repeated.
+
+```{r plot-knn_annual-days, fig.width=8, fig.height=4}
+# loop through population years and extract historical daily values
+sampled_days <- lapply(sampled_years, function(yr) {
+  obs[['day']][which(obs[['day']][['WYEAR']]==yr), ]
+}) %>%
+  rbind_all() %>%
+  mutate(SAMPLE_INDEX=row_number())
+
+# plot combined daily timeseries based on the KNN sampled years
+ggplot(sampled_days, aes(SAMPLE_INDEX, PRCP, color=WYEAR)) +
+  geom_point(size=1) +
+  labs(x='Index Day', y='Daily Precip (mm/day)', title='Synthetic Daily Timeseries from KNN Sampled Years')
+```
+
+### Daily Simulation
+
+The resulting timeseries of daily values for the sampled years is then used to run the `sim_daily()` function. In this function, a Markov Chain simulation is fitted to the synthetic daily timeseries. 
+
+#### State Thresholds
+
+The first step is to compute the state thresholds using the `mc_state_threshold()` function which takes a vector of daily precipitation, a vector of corresponding months, and the `dry_wet_threshold` and `wet_extreme_quantile_threshold`.
+
+```{r mc-state-threshold}
+thresh <- mc_state_threshold(sampled_days[['PRCP']], sampled_days[['MONTH']],
+                             dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8)
+
+thresh_df <- do.call(rbind, thresh) %>%
+  as.data.frame() %>%
+  mutate(month=row_number()) %>%
+  select(month, dry_wet, wet_extreme)
+thresh_df
+```
+
+This figure shows the threshold amounts between the Dry/Wet and Wet/Extreme states for each month. 
+
+```{r plot-mc-state-threshold}
+gather(thresh_df, var, value, -month) %>%
+  ggplot(aes(factor(month), value, fill=var)) +
+  geom_bar(stat='identity', position='dodge') +
+  scale_fill_manual('Threshold', values=c('dry_wet'='orangered', 'wet_extreme'='deepskyblue'),
+                    labels=c('dry_wet'='Dry-Wet', 'wet_extreme'='Wet-Extreme')) +
+  labs(x='Month', y='Threshold Amount (mm/day)', title='Markov State Thresholds by Month')
+```
+
+#### Assign States
+
+After the state thresholds are determined, they are assigned to the synthetic daily timeseries, `sampled_days`.
+
+```{r assign-states}
+sampled_days$STATE <- mc_assign_states(sampled_days$PRCP, sampled_days$MONTH, c('d', 'w', 'e'), thresh)
+head(sampled_days)
+```
+
+This figure shows the Markov state for each day in the first 5 simulated years.
+
+```{r plot-states, fig.width=6, fig.height=4}
+filter(sampled_days, SAMPLE_INDEX <= 365*5) %>%
+ggplot(aes(SAMPLE_INDEX, PRCP, color=STATE)) +
+  geom_point(size=2) +
+  scale_color_manual('Markov State',
+                     values=c('d'='orangered', 'w'='chartreuse3', 'e'='deepskyblue'),
+                     labels=c('d'='Dry', 'w'='Wet', 'e'='Extreme')) +
+  ylim(0, 50) +
+  labs(x='Sample Date Index', y='Daily Precipitation (mm/day)', title='Markov State of Synthetic Daily Timeseries')
+```
+
+#### Fit Markov Chain Transition Matrix
+
+After the states have been assigned ot the sampled daily timeseries, the `mc_fit()` function can be used to fit a Markov Chain model for each month.
+
+```{r fit-transitions}
+transition_matrices <- mc_fit(states=sampled_days[['STATE']], months=sampled_days[['MONTH']])
+```
+
+For example, the transition matrix for June is shown below. The probability of having a wet day follow a dry day is `r format(transition_matrices[[6]]['d', 'w'], digits=2)`, and the probability of two dry days in a row is `r format(transition_matrices[[6]]['d', 'd'], digits=2)`. 
+
+```{r transition-june}
+transition_matrices[[6]]
+```
+
+The equilibrium state can be determined for each month using the `mc_state_equilibrium()` function. This function finds the eigenvector of a transition matrix. The equilibrium state for June is thus:
+
+```{r equil-june}
+mc_state_equilibrium(transition_matrices[[6]])
+```
+
+Once the transition matrices have been fit to the sampled historical daily values, the daily generator can be run.
+
+#### KNN and Markov Chain Simulation
+
+Given the fitted monthly transition matrices, the daily simulation for each simulation year can be performed using the `sim_mc_knn_day()` function. This function simulates a chain of Markov states using the transition matrices, and uses a KNN sampling algorithm to choose the values of each weather variable.
+
+```{r sim-days}
+sampled_days <- dplyr::mutate(sampled_days,
+                              WDAY=waterday(DATE, start_month=10),
+                              STATE_PREV=lag(STATE),
+                              PRCP_PREV=lag(PRCP),
+                              TEMP_PREV=lag(TEMP),
+                              TMAX_PREV=lag(TMAX),
+                              TMIN_PREV=lag(TMIN),
+                              WIND_PREV=lag(WIND))
+
+sim_days <- sim_mc_knn_day(x=sampled_days, n_year=1, states=c('d', 'w', 'e'), transitions=transition_matrices,
+                           start_month=10, start_water_year=2000, include_leap_days=FALSE)
+
+str(sim_days, max=1)
+```
+
+This figure shows the simulated weather variables for the current simulation year.
+
+```{r plot-sim-days, fig.width=8, fig.height=8}
+select(sim_days, DATE, PRCP:WIND) %>%
+  gather(VAR, VALUE, -DATE) %>%
   ggplot(aes(DATE, VALUE)) +
   geom_line() +
-  facet_wrap(~VAR, scales='free_y') +
-  labs(x='', y='')
+  facet_wrap(~VAR, scales='free_y', ncol=1) +
+  labs(x='Simulate Date', y='Value', title='Daily Simulation for One Year')
 ```
 
-Adjust daily simulated precipitation to match annual simulated precipitation.
+#### Annual Precipitation Adjustment
 
-```{r adj-sim-day}
-sim_da_unadj <- select(sim_da[['out']], DATE, PRCP)
-annual_sum_adjustment <- adjust_daily_to_annual(values_day=sim_da[['out']][['PRCP']], 
-                                                years_day=wyear(sim_da[['out']][['DATE']], start_month = start_month), 
-                                                values_yr=coredata(sim_annual_prcp[['out']]), 
-                                                years_yr=time(sim_annual_prcp[['out']]), 
-                                                min_ratio=0.9, max_ratio=1.1)
-sim_da[['out']][, 'PRCP'] <- annual_sum_adjustment$adjusted
+Because the daily precipitation values are sampled directly from historical values, the total precipitation for each simulation year will likely differ from the corresponding simulated annual precipitation.
+
+The `adjust_daily_to_annual()` function is used to adjust the simulated daily precipitation values so that the sum of these values equals the simulated annual total precipitation.
+
+For example, the current simulated annual precipitation is `r format(coredata(sim_annual_prcp[['out']])[1], digits=4)` mm/yr, but the sum of the simulated daily precipitation is `r format(sum(sim_days[['PRCP']]), digits=4)` mm/yr. To adjust the daily values such that their sum equals the simmulated annual value, the daily values can be all multiplied by a factor of `r format(coredata(sim_annual_prcp[['out']])[1]/sum(sim_days[['PRCP']]), digits=3)`. The following code block uses the `adjust_daily_to_annual()` function to perform this adjustment for the first simulation year. Note that this function can be applied to the entire simulated timeseries containing multiple years, and adjust each individual accordingly.
+
+```{r adjust-prcp}
+orig_prcp <- sim_days[['PRCP']]
+adj_prcp <- adjust_daily_to_annual(values_day=sim_days[['PRCP']], 
+                                   years_day=wyear(sim_days[['DATE']]), 
+                                   values_yr=coredata(sim_annual_prcp[['out']])[1], 
+                                   years_yr=time(sim_annual_prcp[['out']])[1], 
+                                   min_ratio=0.5, max_ratio=1.5)
+c(Original=sum(orig_prcp), Adjusted=sum(adj_prcp$adjusted), Annual=coredata(sim_annual_prcp[['out']])[1])
 ```
 
-Compare the annual precip sum
+This figure shows the original and adjusted daily precipitation values. Note how the adjusted values (dashed red line) are linearly scaled by a factor of `r format(sum(adj_prcp$adjusted)/sum(orig_prcp), digits=3)`.
 
-```{r plot-sim-day-yr-adj, fig.width=6, fig.height=3}
-mutate(sim_da_unadj, WYEAR=wyear(DATE, start_month=start_month)) %>%
-  group_by(WYEAR) %>%
-  summarise(PRCP=sum(PRCP)) %>%
-  mutate(SOURCE="Orig Day") %>%
-  rbind(data.frame(WYEAR=time(sim_annual_prcp[['out']]),
-                   PRCP=coredata(sim_annual_prcp[['out']]),
-                   SOURCE="Orig Wyr")) %>%
-  rbind(mutate(sim_da[['out']], WYEAR=wyear(DATE, start_month=start_month)) %>%
-          group_by(WYEAR) %>%
-          summarise(PRCP=sum(PRCP)) %>%
-          mutate(SOURCE="Adj Day")) %>%
-  ggplot(aes(factor(WYEAR), PRCP, color=SOURCE)) +
-  geom_line()
-```
-
-```{r adj-sim-day-changes, warning=FALSE}
-# TODO: compute mean_change from transition matrices
-gamma_adjustment <- adjust_daily_gamma(sim_da[['out']][['PRCP']], sim_da[['out']][['MONTH']], mean_change=prcp_mean_changes, cv_change=prcp_cv_changes)
-sim_da[['out']][, 'PRCP'] <- gamma_adjustment$adjusted
-
-tmin_adjustment <- adjust_daily_additive(x = sim_da[['out']][['TMIN']], 
-                                         months = sim_da[['out']][['MONTH']], 
-                                         changes = temp_changes)
-tmax_adjustment <- adjust_daily_additive(x = sim_da[['out']][['TMAX']], 
-                                         months = sim_da[['out']][['MONTH']], 
-                                         changes = temp_changes)
-temp_adjustment <- adjust_daily_additive(x = sim_da[['out']][['TEMP']], 
-                                         months = sim_da[['out']][['MONTH']], 
-                                         changes = temp_changes)
-sim_da[['out']][, 'TMIN'] <- tmin_adjustment$adjusted
-sim_da[['out']][, 'TMAX'] <- tmax_adjustment$adjusted
-sim_da[['out']][, 'TEMP'] <- temp_adjustment$adjusted
-```
-
-```{r plot-final-daily-results, fig.width=8, fig.height=6}
-select(sim_da[['out']], DATE, PRCP, TEMP, TMIN, TMAX) %>%
-  gather(VAR, VALUE, PRCP:TMAX) %>%
-  ggplot(aes(DATE, VALUE)) +
+```{r plot-adj-prcp, fig.width=8, fig.height=4}
+data.frame(DATE=sim_days[['DATE']],
+           ORIGINAL=orig_prcp,
+           ADJUSTED=adj_prcp$adjusted) %>%
+  gather(VAR, VALUE, -DATE) %>%
+  ggplot(aes(DATE, VALUE, color=VAR, linetype=VAR)) +
   geom_line() +
-  facet_wrap(~VAR, scales='free_y') +
-  labs(x='', y='')
+  scale_color_manual('', values=c('ORIGINAL'='black', 'ADJUSTED'='orangered')) +
+  scale_linetype_manual('', values=c('ORIGINAL'=1, 'ADJUSTED'=2)) +
+  labs(x='Simulation Date', y='Daily Precipitation (mm/day)')
 ```
 
+## Adjustment Factors
 
-```{r, echo=FALSE}
-knitr::opts_chunk$set(eval=FALSE, echo=FALSE)
+After generating the simulated daily timeseries, the precipitation and temperature variables can be adjusted using the change factor parameters. 
+
+For this example, a 5-year simulated timeseries is first generated without using any change factors
+
+```{r adj-sim, warning=FALSE}
+sim <- wgen_daily(zoo_day, 
+                  n_year=5, 
+                  start_month=10, 
+                  start_water_year=2000, 
+                  include_leap_days=FALSE,
+                  n_knn_annual=100,
+                  dry_wet_threshold=0.3, 
+                  wet_extreme_quantile_threshold=0.8,
+                  adjust_annual_precip=TRUE,
+                  annual_precip_adjust_limits=c(0.5, 1.5),
+                  dry_spell_changes=1,
+                  wet_spell_changes=1,
+                  prcp_mean_changes=1,
+                  prcp_cv_changes=1,
+                  temp_mean_changes=0)
 ```
 
+### Precipitation Adjustment
 
-```{r, eval=FALSE}
-library(parallel)
-sim_da_batch <- mclapply(seq(1, 20), function(i) {
-  wgen_daily(obs_day = zoo(x = obs[['day']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
-                               order.by = obs[['day']][['DATE']]), 
-                     n_year=10, n_knn_annual=100,
-                     dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8,
-                     start_month=10, start_water_year=2000, include_leap_days=FALSE,
-                     adjust_annual_precip=TRUE, annual_precip_adjust_limits=c(0.9, 1.1),
-                     dry_spell_changes=1, wet_spell_changes=1,
-                     prcp_mean_changes=1, prcp_cv_changes=1, temp_changes=0)
-}, mc.cores=6)
+The simulated precipitation timeseries can then be adjusted using the `adjust_daily_gamma()` function. This function performs a quantile mapping by first fitting the non-zero precipitation values to a gamma distribution, adjusting the scale and shape parameters of the distribution, and replacing the precipitation values by mapping the original values through the adjusted distribution.
+
+The following code block computes three sets of adjusted timeseries by adjusting the mean, the coefficient of variation, or both parameters.
+
+```{r adj-prcp, warning=FALSE}
+prcp.unadj <- sim[['out']][, c('DATE','MONTH','PRCP')]
+prcp.adj.mean <- adjust_daily_gamma(prcp.unadj[['PRCP']], prcp.unadj[['MONTH']],
+                                    mean_change=1.2, cv_change=1)
+prcp.adj.cv <- adjust_daily_gamma(prcp.unadj[['PRCP']], prcp.unadj[['MONTH']],
+                                  mean_change=1, cv_change=1.2)
+prcp.adj.both <- adjust_daily_gamma(prcp.unadj[['PRCP']], prcp.unadj[['MONTH']],
+                                    mean_change=1.2, cv_change=1.2)
+prcp.df <- data.frame(DATE=prcp.unadj[['DATE']], 
+                      UNADJESTED=prcp.unadj[['PRCP']],
+                      ADJUST_MEAN=prcp.adj.mean[['adjusted']], 
+                      ADJUST_CV=prcp.adj.cv[['adjusted']], 
+                      ADJUST_BOTH=prcp.adj.both[['adjusted']]) %>%
+  gather(GROUP, VALUE, -DATE)
 ```
 
-```{r, eval=FALSE}
-sim_arr <- array(NA_real_, dim=c(20, 3650, 4))
+This figure shows the unadjusted and three adjusted daily precipitation timeseries.
 
-for (i in 1:20) {
-  sim_arr[i,,] <- as.matrix(sim_da_batch[[i]][['out']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX')])  
-}
-
-apply(sim_arr, 3, mean)
+```{r plot-prcp-adj, fig.width=8, fig.height=6}
+ggplot(prcp.df, aes(DATE, VALUE)) +
+  geom_line() +
+  facet_wrap(~GROUP) +
+  labs(x='', y='Daily Precipitation (mm/day)', title='Unadjusted and Adjusted Daily Precipitation')
 ```
 
+This figure shows the annual precipitation for the unadjusted and adjusted precipitation timeseries by water year.
 
-```{r, eval=FALSE}
-sim_da_batch_prcp_mean <- mclapply(seq(0, 100), function(i) {
-  wgen_daily(obs_day = zoo(x = obs[['day']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
-                               order.by = obs[['day']][['DATE']]), 
-                     n_year=10, n_knn_annual=100,
-                     dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8,
-                     start_month=10, start_water_year=2000, include_leap_days=FALSE,
-                     adjust_annual_precip=TRUE, annual_precip_adjust_limits=c(0.9, 1.1),
-                     dry_spell_changes=1, wet_spell_changes=1,
-                     prcp_mean_changes=1+(i-50)/100, prcp_cv_changes=1, temp_changes=0)
-}, mc.cores=6)
+```{r plot-prcp-adj-wyr, fig.width=6, fig.height=4}
+mutate(prcp.df, WYEAR=wyear(DATE, start_month=10)) %>%
+  group_by(WYEAR, GROUP) %>%
+  summarise(VALUE=sum(VALUE)) %>%
+  ggplot(aes(factor(WYEAR), VALUE, fill=GROUP)) +
+  geom_bar(stat='identity', position='dodge') +
+  scale_fill_discrete('') +
+  labs(x='Water Year', y='Annual Precipitation (mm/yr)', title='Annual Precipitation With Adjustments')
+```
 
-sim_da_batch_dry_spell <- lapply(seq(0, 100), function(i) {
-  wgen_daily(obs_day = zoo(x = obs[['day']][, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
-                               order.by = obs[['day']][['DATE']]), 
-                     n_year=10, n_knn_annual=100,
-                     dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8,
-                     start_month=10, start_water_year=2000, include_leap_days=FALSE,
-                     adjust_annual_precip=TRUE, annual_precip_adjust_limits=c(0.9, 1.1),
-                     dry_spell_changes=1+(i-50)/200, wet_spell_changes=1,
-                     prcp_mean_changes=1, prcp_cv_changes=1, temp_changes=0)
-}, mc.cores=6)
+This figure shows the cumulative distribution frequency of each timeseries. Note that the x-axis has been truncated to a maximum of 60 mm/yr in order to show the lower part of the distribution.
+
+```{r plot-prcp-adj-cdf, fig.width=6, fig.height=4}
+prcp.df %>%
+  filter(VALUE>0) %>%
+  group_by(GROUP) %>%
+  arrange(VALUE) %>%
+  mutate(ROW=row_number(),
+         PROB=(ROW-0.5)/n()) %>%
+  ggplot(aes(VALUE, PROB, color=GROUP)) +
+  geom_line() +
+  xlim(0, 60) +
+  scale_color_discrete('') +
+  labs(x='Daily Precipitation (mm/day)', y='Exceedence Probability', title='Distributions of Adjusted Precipitation Timeseries')
+```
+
+### Temperature Adjustment
+
+The temperature timeseries can also be adjusted using a linear additive factor through the `adjust_daily_additive()` function. This function simply adds the adjustment factor to each daily value. In this example, the mean temperature is adjusted by a factor of 5 meaning each daily mean temperature is increased by 5 degrees.
+
+```{r temp-adj}
+temp.unadj <- sim[['out']][, c('DATE','MONTH','TEMP')]
+temp.adj <- adjust_daily_additive(temp.unadj[['TEMP']], temp.unadj[['MONTH']],
+                                  mean_change=5)
+temp.df <- data.frame(DATE=temp.unadj[['DATE']], 
+                      UNADJESTED=temp.unadj[['TEMP']],
+                      ADJUSTED=temp.adj[['adjusted']]) %>%
+  gather(GROUP, VALUE, -DATE)
+```
+
+This figure shows the unadjusted and adjusted daily mean temperature.
+
+```{r plot-temp-adj, fig.width=6, fig.height=4}
+ggplot(temp.df, aes(DATE, VALUE, color=GROUP)) +
+  geom_line() +
+  scale_color_discrete('') +
+  labs(x='', y='Daily Mean Temperature (degC)', title='Unadjusted and Adjusted Daily Mean Temperature')
+```
+
+This figure shows the unadjusted and adjusted annual mean temperature. Note how the adjusted annual mean temperatures are 5 degrees higher than the unadjustd temperatures.
+
+```{r plot-temp-adj-wyr, fig.width=6, fig.height=4}
+mutate(temp.df, WYEAR=wyear(DATE, start_month = 10)) %>%
+  group_by(WYEAR, GROUP) %>%
+  summarise(VALUE=mean(VALUE)) %>%
+  ggplot(aes(factor(WYEAR), VALUE, fill=GROUP)) +
+  geom_bar(stat='identity', position='dodge') +
+  scale_fill_discrete('') +
+  labs(x='', y='Annual Mean Temperature (degC)', title='Unadjusted and Adjusted Annual Mean Temperature')
 ```

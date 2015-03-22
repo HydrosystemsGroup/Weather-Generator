@@ -12,7 +12,7 @@
 #' @param wet_extreme_quantile_threshold threshold quantile for wet/extreme states
 #' @export
 #' @return a named list containing:
-#' \item{\code{x}}{the historical dataset used to train the simulation}
+#' \item{\code{obs}}{the historical observation dataset used to train the simulation}
 #' \item{\code{state_thresholds}}{monthly precipitation thresholds for defining Markov states based on the historical dataset}
 #' \item{\code{transition_matrices}}{monthly transition matrices based on the historical dataset}
 #' \item{\code{state_equilibria}}{monthly state equilibria probabilities}
@@ -22,23 +22,31 @@ sim_daily_from_annual <- function(prcp_yr, obs_day, obs_prcp_yr, start_month=10,
                                   n_knn_annual=100, dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8,
                                   adjust_annual_precip=TRUE, annual_precip_adjust_limits=c(0.9, 1.1),
                                   dry_spell_changes=1, wet_spell_changes=1,
-                                  prcp_mean_changes=1, prcp_cv_changes=1, temp_changes=0) {
+                                  prcp_mean_changes=1, prcp_cv_changes=1, temp_mean_changes=0) {
   if (include_leap_days) {
     stop('Leap days not currently supported')
   }
 
+  if (length(dry_spell_changes) == 1) {
+    dry_spell_changes <- rep(dry_spell_changes, 12)
+  }
+  if (length(wet_spell_changes) == 1) {
+    wet_spell_changes <- rep(wet_spell_changes, 12)
+  }
   if (length(prcp_mean_changes) == 1) {
     prcp_mean_changes <- rep(prcp_mean_changes, 12)
   }
   if (length(prcp_cv_changes) == 1) {
     prcp_cv_changes <- rep(prcp_cv_changes, 12)
   }
-  if (length(temp_changes) == 1) {
-    temp_changes <- rep(temp_changes, 12)
+  if (length(temp_mean_changes) == 1) {
+    temp_mean_changes <- rep(temp_mean_changes, 12)
   }
+  stopifnot(length(dry_spell_changes)==12)
+  stopifnot(length(wet_spell_changes)==12)
   stopifnot(length(prcp_mean_changes)==12)
   stopifnot(length(prcp_cv_changes)==12)
-  stopifnot(length(temp_changes)==12)
+  stopifnot(length(temp_mean_changes)==12)
 
   n_year <- length(prcp_yr)
 
@@ -57,7 +65,7 @@ sim_daily_from_annual <- function(prcp_yr, obs_day, obs_prcp_yr, start_month=10,
     # create population of years with knn
     pop_years <- knn_annual(prcp=prcp, obs_prcp=obs_prcp_yr, n=n_knn_annual)
 
-    # loop through population years and extract
+    # loop through population years and extract historical daily values
     pop_days <- lapply(pop_years, function(yr) {
       obs_df[which(obs_df$WYEAR==yr), ]
     })
@@ -110,13 +118,13 @@ sim_daily_from_annual <- function(prcp_yr, obs_day, obs_prcp_yr, start_month=10,
 
   tmin_adjustment <- adjust_daily_additive(x = sim_day[['TMIN']],
                                            months = sim_day[['MONTH']],
-                                           changes = temp_changes)
+                                           mean_change = temp_mean_changes)
   tmax_adjustment <- adjust_daily_additive(x = sim_day[['TMAX']],
                                            months = sim_day[['MONTH']],
-                                           changes = temp_changes)
+                                           mean_change = temp_mean_changes)
   temp_adjustment <- adjust_daily_additive(x = sim_day[['TEMP']],
                                            months = sim_day[['MONTH']],
-                                           changes = temp_changes)
+                                           mean_change = temp_mean_changes)
   sim_day[, 'TMIN'] <- tmin_adjustment$adjusted
   sim_day[, 'TMAX'] <- tmax_adjustment$adjusted
   sim_day[, 'TEMP'] <- temp_adjustment$adjusted
@@ -131,13 +139,22 @@ sim_daily_from_annual <- function(prcp_yr, obs_day, obs_prcp_yr, start_month=10,
   transitions <- mc_fit(states=obs_df[['STATE']], months=obs_df[['MONTH']])
   equilibria <- lapply(transitions, mc_state_equilibrium)
 
-  list(x=obs_df,
-       state_thresholds=thresh,
+  # convert threshold list to dataframe
+  thresh_df <- do.call(rbind, thresh)
+  thresh_df <- as.data.frame(thresh_df)
+  thresh_df$MONTH <- seq(1, 12)
+  names(thresh_df) <- toupper(names(thresh_df))
+  thresh_df <- thresh_df[, c('MONTH', 'DRY_WET', 'WET_EXTREME')]
+
+  list(obs=obs_df[, c('DATE', 'WYEAR', 'MONTH', 'STATE', 'PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')],
+       state_thresholds=thresh_df,
        transition_matrices=transitions,
        state_equilibria=equilibria,
-       changes=list(ratio_probability_wet=mean_ratio_probability_wet,
-                    prcp_mean=prcp_mean_changes,
-                    prcp_cv=prcp_cv_changes,
-                    temp=temp_changes),
+       change_factors=list(ratio_probability_wet=mean_ratio_probability_wet,
+                           dry_spell_changes=dry_spell_changes,
+                           wet_spell_changes=dry_spell_changes,
+                           prcp_mean=prcp_mean_changes,
+                           prcp_cv=prcp_cv_changes,
+                           temp_mean=temp_mean_changes),
        out=sim_day)
 }

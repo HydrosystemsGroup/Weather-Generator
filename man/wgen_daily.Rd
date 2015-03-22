@@ -4,19 +4,15 @@
 \alias{wgen_daily}
 \title{Run Daily Weather Simulation}
 \usage{
-wgen_daily(obs_day, n_year, dry_spell_changes = 1, wet_spell_changes = 1,
-  prcp_mean_changes = 1, prcp_cv_changes = 1, temp_changes = 0,
-  n_knn_annual = 100, dry_wet_threshold = 0.3,
-  wet_extreme_quantile_threshold = 0.8, start_month = 10,
-  start_water_year = 2000, include_leap_days = FALSE,
-  adjust_annual_precip = TRUE, annual_precip_adjust_limits = c(0.9, 1.1))
+wgen_daily(obs_day, n_year, start_month = 10, start_water_year = 2000,
+  include_leap_days = FALSE, n_knn_annual = 100, dry_wet_threshold = 0.3,
+  wet_extreme_quantile_threshold = 0.8, adjust_annual_precip = TRUE,
+  annual_precip_adjust_limits = c(0.9, 1.1), dry_spell_changes = 1,
+  wet_spell_changes = 1, prcp_mean_changes = 1, prcp_cv_changes = 1,
+  temp_mean_changes = 0)
 }
 \arguments{
 \item{n_year}{number of simulation years}
-
-\item{dry_wet_threshold}{threshold precipitation amount for dry/wet states}
-
-\item{wet_extreme_quantile_threshold}{threshold quantile for wet/extreme states}
 
 \item{start_month}{initial month of the water year}
 
@@ -24,11 +20,31 @@ wgen_daily(obs_day, n_year, dry_spell_changes = 1, wet_spell_changes = 1,
 
 \item{include_leap_days}{include leap days in simulation time series}
 
-\item{historical}{historical climate dataframe}
+\item{n_knn_annual}{number of years used in knn sampling algorithm}
+
+\item{dry_wet_threshold}{threshold precipitation amount for dry/wet states}
+
+\item{wet_extreme_quantile_threshold}{threshold quantile for wet/extreme states}
+
+\item{adjust_annual_precip}{}
+
+\item{annual_precip_adjust_limits}{}
+
+\item{dry_spell_changes}{}
+
+\item{wet_spell_changes}{}
+
+\item{prcp_mean_changes}{}
+
+\item{prcp_cv_changes}{}
+
+\item{temp_mean_changes}{}
+
+\item{x}{daily historical observation dataset as \code{zoo} object with variables PRCP, TEMP, TMIN, TMAX, WIND}
 }
 \value{
 a named list containing:
-\item{\code{x}}{the historical dataset used to train the simulation}
+\item{\code{obs}}{the historical observation dataset used to train the simulation}
 \item{\code{state_thresholds}}{monthly precipitation thresholds for defining Markov states based on the historical dataset}
 \item{\code{transition_matrices}}{monthly transition matrices based on the historical dataset}
 \item{\code{state_equilibria}}{monthly state equilibria probabilities}

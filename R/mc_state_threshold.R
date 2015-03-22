@@ -13,8 +13,15 @@ mc_state_threshold <- function(x, months, dry_wet_threshold=0.3, wet_extreme_qua
 
   df <- data.frame(MONTH=months, PRCP=x)
 
-  thresh <- plyr::dlply(df, c("MONTH"), function(x) {
-    c(dry_wet_threshold, unname(quantile(x[['PRCP']], probs=wet_extreme_quantile_threshold)))
+  thresh <- lapply(seq(1, 12), function(month) {
+    idx <- which(months == month)
+    if (length(idx) > 0) {
+      x.month <- x[idx]
+      res <- c(dry_wet=dry_wet_threshold, wet_extreme=unname(quantile(x.month, probs=wet_extreme_quantile_threshold)))
+    } else {
+      res <- c(dry_wet=NA, wet_extreme=NA)
+    }
+    res
   })
 
   thresh

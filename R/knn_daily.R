@@ -1,5 +1,6 @@
 #' Select k-Nearest Neighbor for Given Simulation State
 #'
+#' @param x historical daily climate dataset
 #' @param wday simulation water-day
 #' @param state simulated state
 #' @param state_prev simulated state of previous water-day
@@ -7,40 +8,39 @@
 #' @param temp_prev simulated temp of previous water-day
 #' @param prcp_sd standard deviation of historical precipitation for current month
 #' @param temp_sd standard deviation of historical temperature for current month
-#' @param historical historical climate dataframe
 #' @export
-knn_daily <- function(wday, state, state_prev, prcp_prev, temp_prev, prcp_sd, temp_sd, historical) {
-  stopifnot(nrow(historical)>0)
+knn_daily <- function(x, wday, state, state_prev, prcp_prev, temp_prev, prcp_sd, temp_sd) {
+  stopifnot(nrow(x)>0)
 
   wd_rng <- waterday_range(wday, n=7)
-  current <- subset(historical, WDAY %in% wd_rng & STATE==state & STATE_PREV==state_prev)
+  current <- subset(x, WDAY %in% wd_rng & STATE==state & STATE_PREV==state_prev)
 
   if (nrow(current) == 0) {
     # try 30-day window
     wd_rng <- waterday_range(wday, n=30)
-    current <- subset(historical, WDAY %in% wd_rng & STATE==state & STATE_PREV==state_prev)
+    current <- subset(x, WDAY %in% wd_rng & STATE==state & STATE_PREV==state_prev)
   }
 
   if (nrow(current) == 0) {
     # try 7-day window with any previous state
     wd_rng <- waterday_range(wday, n=7)
-    current <- subset(historical, WDAY %in% wd_rng & STATE==state)
+    current <- subset(x, WDAY %in% wd_rng & STATE==state)
   }
 
   if (nrow(current) == 0) {
     # try 30-day window with any previous state
     wd_rng <- waterday_range(wday, n=30)
-    current <- subset(historical, WDAY %in% wd_rng & STATE==state)
+    current <- subset(x, WDAY %in% wd_rng & STATE==state)
   }
 
   if (nrow(current) == 0) {
     # try full window with any previous state
-    current <- subset(historical, STATE==state)
+    current <- subset(x, STATE==state)
   }
 
   if (nrow(current) == 0) {
-    # usey any historical day
-    current <- historical
+    # usey any day in x
+    current <- x
   }
 
   stopifnot(nrow(current)>0)

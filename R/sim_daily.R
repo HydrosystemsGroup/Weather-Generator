@@ -42,7 +42,8 @@ sim_daily <- function(historical, n_year, dry_wet_threshold=0.3, wet_extreme_qua
                               PRCP_PREV=lag(PRCP),
                               TEMP_PREV=lag(TEMP),
                               TMAX_PREV=lag(TMAX),
-                              TMIN_PREV=lag(TMIN))
+                              TMIN_PREV=lag(TMIN),
+                              WIND_PREV=lag(WIND))
 
   # fit Markov Chain transition probabilities
   transitions_historical <- mc_fit(states=historical[['STATE']], months=historical[['MONTH']])
@@ -66,10 +67,9 @@ sim_daily <- function(historical, n_year, dry_wet_threshold=0.3, wet_extreme_qua
   ratio_probability_wet <- probability_wet_historical/probability_wet
 
   # run daily simulation
-  sim <- sim_mc_knn_day(n_year=n_year, historical=historical, states=states, transitions=transitions,
+  sim <- sim_mc_knn_day(x=historical, n_year=n_year, states=states, transitions=transitions,
                         start_month=start_month, start_water_year=start_water_year,
                         include_leap_days=include_leap_days)
-  sim_prcp_sampled <- select(sim, DATE, PRCP)
 
   list(x=historical,
        state_thresholds=thresh,
