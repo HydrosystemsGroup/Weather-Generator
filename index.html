@@ -30,7 +30,7 @@
         <section id="main-content">
           <h3>Welcome</h3>
           <p>The weatherGen R package provides a set of functions for generating synthetic climate timeseries. The package is designed to be used for performing a climate stress test of water resource systems.</p>
-          
+
           <p>This package is based on R scripts written by Scott Steinshneider. More information about these models can be found in Steinschneider and Brown (2013).</p>
 
           <p><b>NOTE:</b> This package is currently under heavy development. Future changes are not guarranteed to be backwards-compatible. Use at your own risk</p>
@@ -38,21 +38,18 @@
           <h3>Installation</h3>
           <p>This package can be installed using the devtools package.</p>
 
-<pre><code>library(devtools)
-install_github('walkerjeffd/r-weathergen', build_vignettes=FALSE)
-library(weatherGen)
-</code></pre>
+          <pre><code>library(devtools)
+          install_github('walkerjeffd/r-weathergen', build_vignettes=FALSE)
+          library(weatherGen)
+          </code></pre>
 
           <h3>Data Sources</h3>
           <p>This package is currently being developed for use with the <a href="http://www.engr.scu.edu/~emaurer/gridded_obs/index_gridded_obs.html">Gridded Meteorological Data: 1949-2010</a> by Maurer et al, 2002. Tools for downloading and processing this dataset can be found in the <a href="https://github.com/walkerjeffd/climate-data">walkerjeffd/climate-data</a> repo.</p>
 
-          <h3>Examples</h3>
-          <p>A series of example analyses are provided as vignettes. The following list provides links to rendered output of these examples</p>
+          <h3>Vignettes</h3>
+          <p>The package includes a vignette that describes how to use the package, and how the package works. There is currently only one vignette, but more are in development</p>
           <ul>
-            <li><a href="/r-weathergen/inst/doc/wavelet_analysis.html">Wavelet Analysis</a>: demonstrates how to perform a wavelet transform of an annual precipitation timeseries</li>
-            <li><a href="/r-weathergen/inst/doc/wavelet_components.html">Wavelet Components</a>: demonstrates how to regenerate the components of a wavelet transform</li>
-            <li><a href="/r-weathergen/inst/doc/annual_precip_models.html">Annual Precipitation Models</a>: compares alternate methods for stochastic simulations of annual precipitation timeseries include the WARM and ARMA methods</li>
-            <li><a href="/r-weathergen/inst/doc/monthly_weather_generator.html">Monthly Weather Generator</a>: demonstrates how to use the monthly weather generator based on an AR1 model of annual regional precipitation</li>
+            <li><a href="/r-weathergen/inst/doc/wgen-introduction.html">Introduction to the weathergen Package</a>: Provides an introduction to the package, and describes the functions and algorithms for the daily generator of a single site.</li>
           </ul>
 
           <h3>References</h3>
@@ -61,8 +58,8 @@ library(weatherGen)
             <li>Maurer, E.P., A.W. Wood, J.C. Adam, D.P. Lettenmaier, and B. Nijssen, 2002, A Long-Term Hydrologically-Based Data Set of Land Surface Fluxes and States for the Conterminous United States, J. Climate 15, 3237-3251. doi: <a href="http://dx.doi.org/10.1175/JCLI-D-12-00508.1">10.1175/JCLI-D-12-00508.1</a></li>
             <li>Steinschneider, S., and C. Brown (2013), A semiparametric multivariate, multisite weather generator with low-frequency variability for use in climate risk assessments, Water Resour. Res., 49, 7205–7220. doi:<a href="http://dx.doi.org/10.1002/wrcr.20528">10.1002/wrcr.20528</a></li>
           </ul>
-          
-        
+
+
         </section>
 
         <aside id="sidebar">
@@ -82,6 +79,6 @@ library(weatherGen)
       </div>
     </div>
 
-  
+
   </body>
 </html>

@@ -4,6 +4,5 @@ _site/
 .RData
 ggmapTemp.png
 Gemfile.lock
-inst/doc
 scripts/
 notes/
