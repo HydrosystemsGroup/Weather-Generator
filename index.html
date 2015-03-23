@@ -36,7 +36,14 @@
           <p><b>NOTE:</b> This package is currently under heavy development. Future changes are not guarranteed to be backwards-compatible. Use at your own risk</p>
 
           <h3>Installation</h3>
-          <p>This package can be installed using the devtools package.</p>
+
+          <p>Before installing the weathergen package, you must mannual install the <a href="http://hydromad.catchment.org">hydromad package</a>, which is a required dependency but not available on CRAN.</p>
+
+<pre><code>install.packages(c("zoo", "latticeExtra", "polynom", "car", "Hmisc","reshape"))
+install.packages("hydromad", repos="http://hydromad.catchment.org")
+</code></pre>
+
+          <p>After install hydromad, weathergen can be installed using the devtools package.</p>
 
 <pre><code>library(devtools)
 install_github('walkerjeffd/weathergen', build_vignettes=FALSE)
