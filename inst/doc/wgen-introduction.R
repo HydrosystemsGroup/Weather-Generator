@@ -334,11 +334,11 @@ prcp.df %>%
   arrange(VALUE) %>%
   mutate(ROW=row_number(),
          PROB=(ROW-0.5)/n()) %>%
-  ggplot(aes(VALUE, PROB, color=GROUP)) +
+  ggplot(aes(PROB, VALUE, color=GROUP)) +
   geom_line() +
-  xlim(0, 60) +
+  ylim(0, 60) +
   scale_color_discrete('') +
-  labs(x='Daily Precipitation (mm/day)', y='Exceedence Probability', title='Distributions of Adjusted Precipitation Timeseries')
+  labs(y='Daily Precipitation (mm/day)', x='Non-Exceedence Probability', title='Distributions of Adjusted Precipitation Timeseries')
 
 ## ----temp-adj------------------------------------------------------------
 temp.unadj <- sim[['out']][, c('DATE','MONTH','TEMP')]
