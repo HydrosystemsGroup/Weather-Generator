@@ -28,16 +28,21 @@ sim_daily <- function(historical, n_year, dry_wet_threshold=0.3, wet_extreme_qua
   stopifnot(length(wet_spell_changes)==12)
 
   # add MONTH and WDAY columns
-  historical <- dplyr::mutate(historical, MONTH=month(DATE), WDAY=waterday(DATE, start_month=start_month))
+  historical <- dplyr::mutate(historical,
+                              WDAY=waterday(DATE, start_month=start_month))
 
   # compute precipitation thresholds by month
   states <- c('d', 'w', 'e')
   thresh <- mc_state_threshold(historical[['PRCP']], historical[['MONTH']],
                                dry_wet_threshold=0.3, wet_extreme_quantile_threshold=0.8)
 
+  # assign states to each timestep
+  assigned_states <- mc_assign_states(historical$PRCP, historical$MONTH, states, thresh)
+  assigned_states <- as.character(assigned_states)
+
   # assign precipitation state and lagged variable columns
   historical <- dplyr::mutate(historical,
-                              STATE=as.character(mc_assign_states(PRCP, MONTH, states, thresh)),
+                              STATE=assigned_states,
                               STATE_PREV=lag(STATE),
                               PRCP_PREV=lag(PRCP),
                               TEMP_PREV=lag(TEMP),
