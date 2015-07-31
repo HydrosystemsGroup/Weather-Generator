@@ -10,6 +10,13 @@
 #' @param n_knn_annual number of years used for annual KNN sampling
 #' @param dry_wet_threshold threshold precipitation amount for dry/wet states
 #' @param wet_extreme_quantile_threshold threshold quantile for wet/extreme states
+#' @param adjust_annual_precip flag to adjust simulated daily precip to match simulated annual precip
+#' @param annual_precip_adjust_limits range of maximum annual precip adjustment factors
+#' @param dry_spell_changes adjustment factor(s) for dry spell durations (single value, or vector of length 12 for monthly)
+#' @param wet_spell_changes adjustment factor(s) for wet spell durations (single value, or vector of length 12 for monthly)
+#' @param prcp_mean_changes adjustment factor(s) for mean precip (single value, or vector of length 12 for monthly)
+#' @param prcp_cv_changes adjustment factor(s) for precip CV (single value, or vector of length 12 for monthly)
+#' @param temp_mean_changes adjustment factor(s) for mean temp (single value, or vector of length 12 for monthly)
 #' @export
 #' @return a named list containing:
 #' \item{\code{obs}}{the historical observation dataset used to train the simulation}

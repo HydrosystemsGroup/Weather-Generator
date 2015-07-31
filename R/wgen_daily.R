@@ -1,6 +1,6 @@
 #' Run Daily Weather Simulation
 #'
-#' @param x daily historical observation dataset as \code{zoo} object with variables PRCP, TEMP, TMIN, TMAX, WIND
+#' @param obs_day daily historical observation dataset as \code{zoo} object with variables PRCP, TEMP, TMIN, TMAX, WIND
 #' @param n_year number of simulation years
 #' @param start_month initial month of the water year
 #' @param start_water_year initial water year of simulation
@@ -8,13 +8,13 @@
 #' @param n_knn_annual number of years used in knn sampling algorithm
 #' @param dry_wet_threshold threshold precipitation amount for dry/wet states
 #' @param wet_extreme_quantile_threshold threshold quantile for wet/extreme states
-#' @param adjust_annual_precip
-#' @param annual_precip_adjust_limits
-#' @param dry_spell_changes
-#' @param wet_spell_changes
-#' @param prcp_mean_changes
-#' @param prcp_cv_changes
-#' @param temp_mean_changes
+#' @param adjust_annual_precip flag to adjust simulated daily precip to match simulated annual precip
+#' @param annual_precip_adjust_limits range of maximum annual precip adjustment factors
+#' @param dry_spell_changes adjustment factor(s) for dry spell durations (single value, or vector of length 12 for monthly)
+#' @param wet_spell_changes adjustment factor(s) for wet spell durations (single value, or vector of length 12 for monthly)
+#' @param prcp_mean_changes adjustment factor(s) for mean precip (single value, or vector of length 12 for monthly)
+#' @param prcp_cv_changes adjustment factor(s) for precip CV (single value, or vector of length 12 for monthly)
+#' @param temp_mean_changes adjustment factor(s) for mean temp (single value, or vector of length 12 for monthly)
 #' @return a named list containing:
 #' \item{\code{obs}}{the historical observation dataset used to train the simulation}
 #' \item{\code{state_thresholds}}{monthly precipitation thresholds for defining Markov states based on the historical dataset}

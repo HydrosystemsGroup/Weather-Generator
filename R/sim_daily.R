@@ -7,6 +7,8 @@
 #' @param start_month initial month of the water year
 #' @param start_water_year initial water year of simulation
 #' @param include_leap_days include leap days in simulation time series
+#' @param dry_spell_changes adjustment factor(s) for dry spell durations (single value, or vector of length 12 for monthly)
+#' @param wet_spell_changes adjustment factor(s) for wet spell durations (single value, or vector of length 12 for monthly)
 #' @return a named list containing:
 #' \item{\code{x}}{the historical dataset used to train the simulation}
 #' \item{\code{state_thresholds}}{monthly precipitation thresholds for defining Markov states based on the historical dataset}
