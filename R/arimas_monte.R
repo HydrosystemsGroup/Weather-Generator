@@ -11,14 +11,18 @@
 #' arimas_monte(models, n=40, n.iter=100)
 arimas_monte <- function(models, n, n.iter) {
   # run dummy simulation and wavelet analysis to get number of periods for wavelet transform
-  temp.sim.warm <- simulate_arimas(models=models, n=n)
-  temp.wt <- wavelet_analysis(temp.sim.warm$sum, sig.level=0.90, noise.type='white')
+  temp.sim.warm <- arimas_simulate(models=models, n=n)
+  temp.wt <- wavelet_analysis(temp.sim.warm$sum,
+                              years=seq(2000, length.out=length(temp.sim.warm$sum)),
+                              sig.level=0.90, noise.type='white')
 
   sim.x <- array(NA, c(n, n.iter))
   sim.gws <- array(NA, c(length(temp.wt$gws), n.iter))
   for (i in 1:n.iter) {
-    i.sim.warm <- simulate_arimas(models=models, n=n)
-    i.wt <- wavelet_analysis(i.sim.warm$sum, sig.level=0.90, noise.type='white')
+    i.sim.warm <- arimas_simulate(models=models, n=n)
+    i.wt <- wavelet_analysis(i.sim.warm$sum,
+                             years=seq(2000, length.out=length(i.sim.warm$sum)),
+                             sig.level=0.90, noise.type='white')
     sim.x[,i] <- i.sim.warm$sum
     sim.gws[,i] <- i.wt$gws
   }
