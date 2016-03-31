@@ -55,7 +55,10 @@ ggplot(clim.wyr, aes(WYEAR, PRCP)) +
 The timeseries is first analyzed using the `wavelet_analysis()` function, which returns the wavelet transform and associated information.
 
 ```{r wavelet}
-wt.wgen <- wavelet_analysis(x=clim.wyr$PRCP, sig.level=0.90, noise.type="white")
+wt.wgen <- wavelet_analysis(x=clim.wyr$PRCP,
+                            years=clim.wyr$WYEAR,
+                            sig.level=0.90,
+                            noise.type="white")
 ```
 
 The following figure shows the power of the time-averaged global wave spectrum and the significance level for each period using a white background noise and a threshold of 0.90.

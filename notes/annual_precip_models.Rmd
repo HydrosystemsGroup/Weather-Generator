@@ -576,7 +576,8 @@ We can repeat the same analysis using the `weathergen` package.
 First, perform the wavelet analysis.
 
 ```{r wgen wave}
-wgen_wave <- weathergen::wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, 
+wgen_wave <- weathergen::wavelet_analysis(clim.wyr$PRCP, years=clim.wyr$WYEAR,
+                                          sig.level=0.90, 
                                           noise.type='white')
 ```
 
@@ -595,7 +596,7 @@ wgen_wave.comp <- weathergen::wavelet_components(x=clim.wyr$PRCP,
 Now create the arima models.
 
 ```{r wgen arima models}
-wgen_models <- weathergen::arima_models(components=wgen_wave.comp)
+wgen_models <- weathergen::arima_fit_components(components=wgen_wave.comp)
 ```
 
 Here is a plot of the forecasts for each component arima model (top panel is the noise component, bottom panel is the wavelet component).
@@ -609,16 +610,16 @@ par(mfrow=c(1,1))
 
 ## ARIMA Model Simulations
 
-Simulations for each ARIMA models are generated using the `weathergen::simulate.arima()` function.
+Simulations for each ARIMA models are generated using the `weathergen::arima_simulate()` function.
 
 ```{r wgen simulate arima}
-weathergen::simulate_arima(model=wgen_models[['COMPONENT 1']], n=40)
+weathergen::arima_simulate(model=wgen_models[['COMPONENT 1']], n=40)
 ```
 
-And the `weathergen::simulate.arimas()` function can then be used to simulate a list of arima models containing multiple components (noise and wavelet).
+And the `weathergen::arimas_simulate()` function can then be used to simulate a list of arima models containing multiple components (noise and wavelet).
 
 ```{r wgen simulate arimas}
-wgen_sim.warm <- weathergen::simulate_arimas(models=wgen_models, n=40)
+wgen_sim.warm <- weathergen::arimas_simulate(models=wgen_models, n=40)
 wgen_sim.warm
 ```
 
@@ -631,14 +632,16 @@ plot(wgen_sim.warm$sum, type='l', xlab='Timestep (year)', ylab='Simulated Annual
 We can then perform a wavelet analysis of the simulated precipitation to compare the GWS of the observed timeseries with that of the simulated timeseries.
 
 ```{r wgen wavelet analysis sim precip}
-wgen_wt.sim.warm <- weathergen::wavelet_analysis(wgen_sim.warm$sum, sig.level=0.90,
+wgen_wt.sim.warm <- weathergen::wavelet_analysis(wgen_sim.warm$sum,
+                                                 years=seq(2000, length.out=length(wgen_sim.warm$sum)),
+                                                 sig.level=0.90,
                                                  noise.type='white')
 ```
 
-Finally, we can use the `weathergen::mc_arima()` function to perform a Monte Carlo simulation by repeating this procedure multiple times.
+Finally, we can use the `weathergen::arimas_monte()` function to perform a Monte Carlo simulation by repeating this procedure multiple times.
 
 ```{r wgen mc arimas, message=FALSE, warning=FALSE}
-wgen_mc <- weathergen::mc_arimas(models=wgen_models, n=40, n.iter=100)
+wgen_mc <- weathergen::arimas_monte(models=wgen_models, n=40, n.iter=100)
 str(wgen_mc)
 ```
 

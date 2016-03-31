@@ -18,33 +18,11 @@ library(weathergen)
 theme_set(theme_bw())
 ```
 
-```{r location}
-latitude <- 42
-longitude <- -72
-```
-
 ```{r load-climate-data}
-library(RPostgreSQL)
-drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "cst")
-
-# get the huc8 of location
-huc8 <- dbGetQuery(con, statement=paste(
-  "SELECT w.huc8",
-  "FROM wbdhu8 w",
-  "WHERE ST_Contains(w.geom, ST_SetSRID(ST_MakePoint(",
-    longitude, ",", latitude,
-  "),4326))",
-  "LIMIT 1"))
-
-# get maurer locations in this huc
-clim.da <- dbGetQuery(con, statement=paste(
-  "SELECT date, prcp, tmax, tmin",
-  "FROM get_daily_upstream_nearest(",
-    latitude, ",", longitude,
-  ")"))
-names(clim.da) <- toupper(names(clim.da))
+data(climate_cities)
+clim.da <- climate_cities[['boston']]
 clim.da$TEMP <- (clim.da$TMIN+clim.da$TMAX)/2
+head(clim.da)
 
 head(clim.da)
 ```
@@ -90,7 +68,9 @@ ggplot(aes(WYEAR, VALUE)) +
 # Annual Simulation
 
 ```{r wavelet-analysis}
-wgen_wave <- wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, noise.type='white')
+wgen_wave <- wavelet_analysis(clim.wyr$PRCP, 
+                              years = clim.wyr$WYEAR,
+                              sig.level=0.90, noise.type='white')
 plot(wgen_wave$gws, wgen_wave$period, type="b",
      xlab="Global Wavelet Spectrum", ylab="Fourier Period (Years)",
      log="y", ylim=rev(range(wgen_wave$period)), 
@@ -110,7 +90,7 @@ wgen_wave.comp <- wavelet_components(x=clim.wyr$PRCP,
 
 ```{r plot-forecast}
 library(forecast)
-wgen_models <- arima_models(components=wgen_wave.comp)
+wgen_models <- arima_fit_components(components=wgen_wave.comp)
 par(mfrow=c(3,1))
 plot(forecast(wgen_models[["NOISE"]], h=nrow(clim.wyr)))
 plot(forecast(wgen_models[["COMPONENT 1"]], h=nrow(clim.wyr)))
@@ -133,7 +113,7 @@ transform_data <- FALSE
 ```
 
 ```{r plot-arima-sim}
-wgen_sim.warm <- simulate_arimas(models=wgen_models, n=num_year_sim)
+wgen_sim.warm <- arimas_simulate(models=wgen_models, n=num_year_sim)
 plot(wgen_sim.warm$sum, type='l')
 ```
 
@@ -236,7 +216,7 @@ This figure shows the annual precipitation for each water year, with the `r kk` 
 clim.wyr %>%
   ggplot(aes(WYEAR, PRCP, color=WYEAR %in% unique(CUR_YEARS))) +
   geom_point() +
-  geom_hline(yint=sim.wyr[i_wyr, 'PRCP'], linetype=2, color='red') +
+  geom_hline(yintercept=sim.wyr[i_wyr, 'PRCP'], linetype=2, color='red') +
   geom_text(aes(label=WYEAR), hjust=-0.1, vjust=0.5, size=4) +
   scale_color_manual('', values=c('TRUE'='orangered', 'FALSE'='grey50'), guide=FALSE) +
   labs(x="Water Year", y="Annual Precip (mm/yr)")
@@ -465,7 +445,7 @@ p2 <- data.frame(p_june_new) %>%
   labs(x="From State", y="To State")   +
   ggtitle('Adjusted June Matrix')  
 
-grid.arrange(p1, p2, main="\nChange in Transition Matrix with dry=2", ncol=2)
+grid.arrange(grobs=list(p1, p2), top="\nChange in Transition Matrix with dry=2", ncol=2)
 ```
 
 ```{r plot-wet-spell-change, fig.width=8, fig.height=4}
@@ -493,7 +473,8 @@ p2 <- data.frame(p_june_new) %>%
   labs(x="From State", y="To State") +
   ggtitle('Adjusted June Matrix')  
 
-grid.arrange(p1, p2, main="\nChange in Transition Matrix with wet=1.5", ncol=2)
+grid.arrange(grobs=list(p1, p2),
+             top="\nChange in Transition Matrix with wet=1.5", ncol=2)
 ```
 
 ## Markov Chain Simulation

@@ -260,7 +260,7 @@ bw$gws <- apply(bw$power, 1, mean)
 The significance test of the GWS can be computed using the `biwavelet::wt.sig()` function. Note that the degrees of freedom is equal to the number of data points adjusted by scale (to account for edge effects).
 
 ```{r bw gws sig}
-bw$gws.sig <- wt.sig(d=clim.wyr$PRCP, dt=bw$dt, scale=bw$scale, sig.test=1, 
+bw$gws.sig <- wt.sig(d=cbind(clim.wyr$WYEAR, clim.wyr$PRCP), dt=bw$dt, scale=bw$scale, sig.test=1, 
                      sig.level=0.90, dof=length(clim.wyr$PRCP)-bw$scale, 
                      mother='morlet', lag1=0.0)
 ```
@@ -301,7 +301,9 @@ WAVELET_ANALYSIS(CLIMATE_VARIABLE=clim.wyr$PRCP, siglvl=0.90,
 The `weathergen` package provides a `wavelet_analysis()` function that uses the biwavelet `wt()` and `wt.sig()` functions to provide similar functionality as Scott's `WAVELET_ANALYSIS()` function, but with fewer lines of code. 
 
 ```{r wgen}
-wave.wgen <- wavelet_analysis(x=clim.wyr$PRCP, sig.level=0.90, noise.type="white")
+wave.wgen <- wavelet_analysis(x=clim.wyr$PRCP,
+                              years=clim.wyr$WYEAR,
+                              sig.level=0.90, noise.type="white")
 str(wave.wgen)
 ```
 

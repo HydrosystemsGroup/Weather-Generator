@@ -46,7 +46,7 @@ Zoomed into new england. The green points will be used to compute a regional ave
 ggmap(map, darken=c(0.25, "white"), extent="device") +
   geom_point(aes(x=LON, y=LAT, color=SELECT), 
              data=mutate(df.grid, SELECT=(LAT<=43)), size=1) +
-  geom_hline(yint=43, color='green', linetype=2) +
+  geom_hline(yintercept=43, color='green', linetype=2) +
   scale_color_manual(values=c("TRUE"="green", "FALSE"="red"), guide=FALSE)
 ```
 
@@ -142,7 +142,7 @@ head(clim.reg.yr)
 Perform wavelet analysis on regional average annual precipitation timeseries.
 
 ```{r plot wave, message=FALSE, warning=FALSE}
-wt.reg <- wavelet_analysis(clim.reg.yr$PRCP, sig.level=0.90, noise.type='white')
+wt.reg <- wavelet_analysis(clim.reg.yr$PRCP, years=clim.reg.yr$YEAR, sig.level=0.90, noise.type='white')
 
 par(mfrow=c(1,2))
 plot(wt.reg, plot.cb=TRUE, plot.phase=FALSE)
@@ -173,7 +173,7 @@ plot(forecast(models[['PRCP']], h=20), main="ARIMA Forecast of Regional Annual P
 Generate 50 simulations of annual precipitation using the AR1 model of the regional annual precipitation.
 
 ```{r mc ar, warning=FALSE}
-sim.prcp <- weathergen::mc_arimas(models=models, n=nrow(clim.reg.yr), n.iter=50)
+sim.prcp <- weathergen::arimas_monte(models=models, n=nrow(clim.reg.yr), n.iter=50)
 str(sim.prcp)
 ```
 
@@ -288,7 +288,7 @@ distances <- cbind(clim.reg.yr, DISTANCE=sqrt((sim.prcp$x[j,samp] - clim.reg.yr$
 ggplot(distances, aes(YEAR, PRCP)) + 
   geom_line() +
   geom_point(aes(color=DISTANCE), size=3) +
-  geom_hline(yint=sim.prcp$x[j,samp], linetype=2, color='red') +
+  geom_hline(yintercept=sim.prcp$x[j,samp], linetype=2, color='red') +
   geom_text(x=max(distances$YEAR), y=sim.prcp$x[j,samp], label="Sim", hjust=1, vjust=-0.5) +
   scale_color_gradient(low='green', high='red') +
   labs(x="Year", y="Annual Precipitation (mm/yr)", 
@@ -304,7 +304,7 @@ distances %>%
   ggplot(aes(YEAR, PRCP)) + 
   geom_line() +
   geom_point(aes(color=DISTANCE), size=3) +
-  geom_hline(yint=sim.prcp$x[j,samp], linetype=2, color='red') +
+  geom_hline(yintercept=sim.prcp$x[j,samp], linetype=2, color='red') +
   geom_point(mapping=aes(alpha=IN_TOP_8), color='black', shape=1, size=4) +
   geom_text(aes(x=YEAR, y=PRCP, label=YEAR), data=filter(distances, IN_TOP_8), vjust=-1) +
   geom_text(x=max(distances$YEAR), y=sim.prcp$x[j,samp], label="Sim", hjust=1, vjust=-0.5) +
@@ -322,7 +322,7 @@ distances.top <- filter(distances, IN_TOP_8) %>%
 distances.top %>%
   ggplot(aes(PRCP, WEIGHT)) +
   geom_point() +
-  geom_vline(xint=sim.prcp$x[j,samp], linetype=2, color='red') +
+  geom_vline(xintercept=sim.prcp$x[j,samp], linetype=2, color='red') +
   geom_text(aes(label=YEAR), hjust=-0.1) +
   geom_text(x=sim.prcp$x[j,samp], y=0.4, label="Sim Precip", hjust=-0.1) +
   labs(x="Annual Precipitation (mm)", y="Sample Weight")
@@ -525,6 +525,13 @@ do.call(rbind, gen.loc.yr) %>%
 
 ## weathergen Package
 
+**NOTE: The following code no longer works, the monthly simulation was removed from a previous version. I'll leave it here for reference.**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(eval=FALSE)
+```
+
+
 The `weathergen::gen_mon_arma()` function provides a wrapper around these steps to generate multiple monthly timeseries based on the regional annual precipitation timeseries and the location monthly climate timeseries. This function returns a list object containing the following elements:
 
 - `$models`: list of arma models (only 1 if using ARMA model instead of WARM model)
@@ -682,7 +689,7 @@ df.trends %>%
 
 # Session Info
 
-```{r session}
+```{r session, eval=TRUE}
 sessionInfo()
 ```
 

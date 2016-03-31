@@ -25,7 +25,8 @@ states <- c('d', 'w', 'e')
 
 ```{r load-climate-data}
 data(climate_cities)
-clim.da <- climate_cities[['boston']]
+clim.da <- climate_cities[['boston']] %>%
+  mutate(TEMP=(TMIN+TMAX)/2)
 head(clim.da)
 ```
 
@@ -43,7 +44,7 @@ clim.wyr <- group_by(clim.da, WYEAR=wyear(DATE)) %>%
             TEMP=mean(TEMP))
 clim.da <- mutate(clim.da, 
                   MONTH=month(DATE),
-                  WDAY=waterday(DATE, start.month=start_mon))
+                  WDAY=waterday(DATE, start_month=start_mon))
 
 complete_years <- clim.wyr$WYEAR[which(clim.wyr$N>=365)]
 clim.da <- filter(clim.da, wyear(DATE) %in% complete_years)
@@ -73,7 +74,7 @@ There are three Markov states: (d)ry, (w)et, and (e)xtremely wet. The threshold 
 
 ```{r thresh}
 print(mc_state_threshold)
-thresh <- mc_state_threshold(prcp=clim.da[['PRCP']], months=clim.da[['MONTH']], 
+thresh <- mc_state_threshold(x=clim.da[['PRCP']], months=clim.da[['MONTH']], 
                              dry_wet=0.3, wet_extreme_quantile=0.8)
 print(thresh[[1]])
 ```
@@ -144,7 +145,7 @@ Run the Markov Chain simulation using the `weathergen::mc_sim()` function, which
 
 ```{r assign-state}
 print(mc_sim)
-sim$STATE <- mc_sim(months=month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transitions=transitions)
+sim$STATE <- mc_simulate(months=month(sim$DATE), initial=sim[[1, 'STATE']], states=states, transitions=transitions)
 ```
 
 We can check the simulation by comparing the estimated transition probabilities between the simulated and historical time series.
@@ -170,14 +171,14 @@ historical_stats <- plyr::dlply(historical_stats, c("VAR"), function(x) {
 
 for (i in 2:nrow(sim)) {
   m <- sim[i, 'MONTH']
-  selected <- select_knn_day(wday=sim[[i, 'WDAY']], 
-                             state=sim[[i, 'STATE']], 
-                             state_prev=sim[[i-1, 'STATE']],
-                             prcp_prev=sim[[i-1, 'PRCP']], 
-                             temp_prev=sim[[i-1, 'TEMP']],
-                             prcp_sd=historical_stats[['PRCP']][[m]][['SD']], 
-                             temp_sd=historical_stats[['TEMP']][[m]][['SD']],
-                             historical=clim)
+  selected <- knn_daily(x=clim,
+                        wday=sim[[i, 'WDAY']], 
+                        state=sim[[i, 'STATE']], 
+                        state_prev=sim[[i-1, 'STATE']],
+                        prcp_prev=sim[[i-1, 'PRCP']], 
+                        temp_prev=sim[[i-1, 'TEMP']],
+                        prcp_sd=historical_stats[['PRCP']][[m]][['SD']], 
+                        temp_sd=historical_stats[['TEMP']][[m]][['SD']])
 
   sim[i, 'SAMPLE_DATE'] <- selected[[1, 'DATE']]
   sim[i, 'PRCP'] <- selected[[1, 'PRCP']]
@@ -204,16 +205,20 @@ select(sim, WDAY, WYEAR, DATE, PRCP:TMAX) %>%
 Everything above is wrapped within the `weathergen::wgen_historical_day()` function. This function takes as arguments the historical timeseries, number of simulation years, and the start month of the water year.
 
 ```{r run-sim-2}
-sim <- wgen_historical_day(clim.da, n_year = length(unique(wyear(clim.da$DATE))), start_mon = 10)
+library(zoo)
+obs_day <- zoo(x = clim.da[, c('PRCP', 'TEMP', 'TMIN', 'TMAX', 'WIND')], 
+                          order.by = clim.da[['DATE']])
+
+sim <- wgen_daily(obs_day = obs_day,
+                  n_year = length(unique(wyear(clim.da$DATE))),
+                  start_mon = 10)
 ```
 
 Combine the simulated and historical time series into a single data frame for plotting below.
 
 ```{r combine-sim-hist}
-comp <- rbind(select(sim, WYEAR, DATE, PRCP:TMAX) %>%
+comp <- rbind(select(sim$out, DATE, PRCP:TMAX) %>%
                 gather(VAR, VALUE, PRCP:TMAX) %>%
-                mutate(DATE=DATE+years(WYEAR-1-(2001-1949))) %>%
-                select(-WYEAR) %>%
                 mutate(SOURCE='sim'),
               select(clim.da, DATE, PRCP:TEMP) %>%
                 gather(VAR, VALUE, PRCP:TEMP) %>%
@@ -264,7 +269,7 @@ This plot shows the distribution of spell lengths for each month based on the hi
 
 ```{r plot-spell}
 rle_sim <- lapply(seq(1, 12), function(m) {
-  sim_mon <- subset(sim, MONTH==m)
+  sim_mon <- subset(sim$out, MONTH==m)
   rle_sim <- rle(as.character(sim_mon[['STATE']]))
   rle_sim <- data.frame(N=rle_sim$lengths, STATE=rle_sim$values)
   rle_sim[['MONTH']] <- m
@@ -316,7 +321,7 @@ This figure compares the frequency of each markov state by month between the his
 
 ```{r plot-state-freq, fig.height=6}
 df_equil <- lapply(seq(1, 12), function(m) {
-  equil <- mc_equilibrium(transitions[[m]])
+  equil <- mc_state_equilibrium(transitions[[m]])
   df <- data.frame(STATE=names(equil), FREQ=unname(equil))
   df[['MONTH']] <- m
   df
@@ -325,7 +330,7 @@ df_equil <- lapply(seq(1, 12), function(m) {
   mutate(STATE=ordered(STATE, levels=states))
 
 comp_state <- rbind(select(clim, DATE, MONTH, STATE) %>% mutate(SOURCE="hist"),
-                    select(sim, DATE, MONTH, STATE) %>% mutate(SOURCE="sim"))
+                    select(sim$out, DATE, MONTH, STATE) %>% mutate(SOURCE="sim"))
 comp_state <- comp_state %>%
   group_by(SOURCE, MONTH, STATE) %>%
   summarize(N_STATE=n())
@@ -356,7 +361,7 @@ transitions_wetter <- lapply(transitions, function(trans) {
 })
 
 equil_hist <- lapply(transitions, function(trans) {
-  mc_equilibrium(trans)
+  mc_state_equilibrium(trans)
 }) %>%
   do.call(rbind, .) %>%
   as.data.frame %>%
@@ -364,7 +369,7 @@ equil_hist <- lapply(transitions, function(trans) {
   gather(STATE, FREQ, d, w, e) %>%
   mutate(SOURCE='hist')
 equil_drier <- lapply(transitions_drier, function(trans) {
-  mc_equilibrium(trans)
+  mc_state_equilibrium(trans)
 }) %>%
   do.call(rbind, .) %>%
   as.data.frame %>%
@@ -372,7 +377,7 @@ equil_drier <- lapply(transitions_drier, function(trans) {
   gather(STATE, FREQ, d, w, e) %>%
   mutate(SOURCE='drier')
 equil_wetter <- lapply(transitions_wetter, function(trans) {
-  mc_equilibrium(trans)
+  mc_state_equilibrium(trans)
 }) %>%
   do.call(rbind, .) %>%
   as.data.frame %>%
@@ -388,15 +393,15 @@ ggplot(equil_comp, aes(factor(MONTH), FREQ, color=SOURCE)) +
 ```
 
 ```{r sim-wet-dry}
-sim_drier <- sim_mc_knn_day(n_year=length(unique(wyear(clim.da$DATE))), historical=clim, states=states, transitions=transitions_drier)
-sim_wetter <- sim_mc_knn_day(n_year=length(unique(wyear(clim.da$DATE))), historical=clim, states=states, transitions=transitions_wetter)
+sim_drier <- sim_mc_knn_day(x=clim, n_year=length(unique(wyear(clim.da$DATE))), states=states, transitions=transitions_drier)
+sim_wetter <- sim_mc_knn_day(x=clim, n_year=length(unique(wyear(clim.da$DATE))), states=states, transitions=transitions_wetter)
 ```
 
 This figure shows the difference in frequencies of each state, by month, and across the differen datasets.
 
 ```{r plot-comp-2}
 comp_state <- rbind(select(clim, DATE, MONTH, STATE) %>% mutate(SOURCE="hist"),
-                    select(sim, DATE, MONTH, STATE) %>% mutate(SOURCE="sim"),
+                    select(sim$out, DATE, MONTH, STATE) %>% mutate(SOURCE="sim"),
                     select(sim_drier, DATE, MONTH, STATE) %>% mutate(SOURCE="drier"),
                     select(sim_wetter, DATE, MONTH, STATE) %>% mutate(SOURCE="wetter"))
 comp_state <- comp_state %>%
@@ -418,10 +423,13 @@ ggplot(comp_state, aes(MONTH, FREQ, color=SOURCE)) +
 
 # Ensemble Batch
 
+**NOT RUN**
+
 ```{r, eval=FALSE}
 library(parallel)
 sim_batch <- mclapply(seq(1, 100), function(i) {
-  sim <- sim_day(n_year=61, historical=clim, states=states, transitions=transitions)
+  sim <- sim_mc_knn_day(x=clim, n_year=61,
+                        states=states, transitions=transitions)
   sim$TRIAL <- i
   sim
 }, mc.cores=6L)

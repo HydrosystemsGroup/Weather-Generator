@@ -20,14 +20,16 @@ library(weathergen)
 data(climate_cities)
 
 clim.da <- climate_cities[['boston']] %>%
-  mutate(WYEAR=wyear(DATE, start.month=10),
-         MONTH=month(DATE))
+  mutate(WYEAR=wyear(DATE, start_month=10),
+         MONTH=month(DATE),
+         TEMP=(TMAX+TMIN)/2)
 
 # aggregate by water year
 clim.wyr <- clim.da %>%
   group_by(WYEAR) %>%
   summarise(N=n(),
             PRCP=sum(PRCP),
+            TEMP=mean(TEMP),
             TMIN=mean(TMIN),
             TMAX=mean(TMAX)) %>%
   filter(N>=365)
@@ -49,7 +51,7 @@ ggplot(clim.wyr, aes(WYEAR, PRCP)) +
 First, perform the wavelet analysis.
 
 ```{r wgen wave}
-wgen_wave <- weathergen::wavelet_analysis(clim.wyr$PRCP, sig.level=0.90, 
+wgen_wave <- weathergen::wavelet_analysis(clim.wyr[['PRCP']], years=clim.wyr[['WYEAR']], sig.level=0.90, 
                                           noise.type='white')
 ```
 
@@ -75,10 +77,10 @@ wgen_wave.comp <- weathergen::wavelet_components(x=clim.wyr$PRCP,
 
 ## Create ARIMA Models
 
-Now create the arima models.
+Now fit the individual wavelet components to arima models.
 
 ```{r wgen arima models}
-wgen_models <- weathergen::arima_models(components=wgen_wave.comp)
+wgen_models <- weathergen::arima_fit_components(components=wgen_wave.comp)
 ```
 
 Here is a plot of the forecasts for each component arima model (top panel is the noise component, bottom panel is the wavelet component).
@@ -92,16 +94,16 @@ par(mfrow=c(1,1))
 
 ## ARIMA Model Simulations
 
-Simulations for each ARIMA models are generated using the `weathergen::simulate.arima()` function.
+Simulations for each ARIMA models are generated using the `weathergen::arima_simulate()` function.
 
 ```{r wgen simulate arima}
-weathergen::simulate_arima(model=wgen_models[['COMPONENT 1']], n=40)
+weathergen::arima_simulate(model=wgen_models[['COMPONENT 1']], n=40)
 ```
 
-And the `weathergen::simulate.arimas()` function can then be used to simulate a list of arima models containing multiple components (noise and wavelet).
+And the `weathergen::arimas_simulate()` function can then be used to simulate a list of arima models containing multiple components (noise and wavelet).
 
 ```{r wgen simulate arimas}
-wgen_sim.warm <- weathergen::simulate_arimas(models=wgen_models, n=40)
+wgen_sim.warm <- weathergen::arimas_simulate(models=wgen_models, n=40)
 wgen_sim.warm
 ```
 
@@ -114,14 +116,16 @@ plot(wgen_sim.warm$sum, type='l', xlab='Timestep (year)', ylab='Simulated Annual
 We can then perform a wavelet analysis of the simulated precipitation to compare the GWS of the observed timeseries with that of the simulated timeseries.
 
 ```{r wgen wavelet analysis sim precip}
-wgen_wt.sim.warm <- weathergen::wavelet_analysis(wgen_sim.warm$sum, sig.level=0.90,
+wgen_wt.sim.warm <- weathergen::wavelet_analysis(wgen_sim.warm$sum,
+                                                 years=seq(2000, length.out = length(wgen_sim.warm$sum)),
+                                                 sig.level=0.90,
                                                  noise.type='white')
 ```
 
 Finally, we can use the `weathergen::mc_arima()` function to perform a Monte Carlo simulation by repeating this procedure multiple times.
 
 ```{r wgen mc arimas, message=FALSE, warning=FALSE}
-wgen_mc <- weathergen::mc_arimas(models=wgen_models, n=40, n.iter=100)
+wgen_mc <- weathergen::arimas_monte(models=wgen_models, n=40, n.iter=100)
 str(wgen_mc)
 ```
 
@@ -160,21 +164,22 @@ plot_gws_power(wgen_wave=wgen_wave, wgen_mc=wgen_mc)
 This figure compares the mean, standard deviation and skew of the simulated trials (black point is mean) and the observed (red point) annual timeseries.
 
 ```{r}
-plot_wgen_mc_stats(obs=clim.wyr$PRCP, wgen_mc=wgen_mc)
+plot_arimas_monte(obs=clim.wyr$PRCP, wgen_mc=wgen_mc)
 ```
 
 # Annual k-Nearest Neighbors
 
 ```{r knn-year-function}
-print(select_knn_year)
-sim_years <- select_knn_year(sim_prcp=wgen_mc$x[1, 1], obs_prcp=clim.wyr$PRCP, obs_years=clim.wyr$WYEAR, n=100)
+print(knn_annual)
+sim_years_index <- knn_annual(prcp=wgen_mc$x[1, 1], obs_prcp=clim.wyr$PRCP, n=100)
+sim_years <- clim.wyr$WYEAR[sim_years_index]
 ```
 
 ```{r plot-knn-year}
 clim.wyr %>%
   ggplot(aes(WYEAR, PRCP, color=WYEAR %in% unique(sim_years))) +
   geom_point() +
-  geom_hline(yint=wgen_mc$x[1, 1], linetype=2, color='red') +
+  geom_hline(yintercept=wgen_mc$x[1, 1], linetype=2, color='red') +
   geom_text(aes(label=WYEAR), hjust=-0.1, vjust=0.5, size=4) +
   scale_color_manual('', values=c('TRUE'='orangered', 'FALSE'='grey50'), guide=FALSE) +
   labs(x="Water Year", y="Annual Precip (mm/yr)")
@@ -202,7 +207,7 @@ data.frame(WYEAR=sim_years) %>%
 If we increase the sample size from 100 to 100,000 then the sampled frequency and probabilities converge:
 
 ```{r}
-data.frame(WYEAR=select_knn_year(sim_prcp=wgen_mc$x[1, 1], obs_prcp=clim.wyr$PRCP, obs_years=clim.wyr$WYEAR, n=100000)) %>%
+data.frame(WYEAR=clim.wyr$WYEAR[knn_annual(prcp=wgen_mc$x[1, 1], obs_prcp=clim.wyr$PRCP, n=100000)]) %>%
   group_by(WYEAR) %>%
   summarise(N=n()) %>%
   left_join(select(clim.wyr, WYEAR, PRCP)) %>%
@@ -230,12 +235,12 @@ stopifnot(all(unique(sampled_day$WYEAR) %in% unique(sim_years)))
 ```
 
 ```{r}
-sim_day_1 <- wgen_historical_day(sampled_day, n_year = 1, start_month = 10)
-all(unique(wyear(sim_day_1$SAMPLE_DATE)) %in% sim_years)
+sim_day_1 <- sim_daily(sampled_day, n_year = 1, start_month = 10)
+all(unique(wyear(sim_day_1$out$SAMPLE_DATE)) %in% sim_years)
 ```
 
 ```{r}
-select(sim_day_1, WDAY, PRCP, TMIN, TMAX, TEMP) %>%
+select(sim_day_1$out, WDAY, PRCP, TMIN, TMAX, TEMP) %>%
   gather(VAR, VALUE, PRCP:TEMP) %>%
   ggplot(aes(WDAY, VALUE)) +
   geom_line() +
@@ -249,17 +254,19 @@ Run all years
 library(parallel)
 sim_day_list <- mclapply(seq_along(wgen_mc$x[, 1]), function(i) {
   sim_prcp <- wgen_mc$x[i, 1]
-  sim_years <- select_knn_year(sim_prcp=sim_prcp, obs_prcp=clim.wyr$PRCP, obs_years=clim.wyr$WYEAR, n=100)
+  sim_years <- knn_annual(prcp=sim_prcp, obs_prcp=clim.wyr$PRCP,
+                          n=100)
+  sim_years <- clim.wyr$WYEAR[sim_years]
   sampled_day <- lapply(sim_years, function(yr) {
     clim.da[which(clim.da$WYEAR==yr), ]
   })
   sampled_day <- do.call(rbind, sampled_day)
   stopifnot(all(unique(sampled_day$WYEAR) %in% unique(sim_years)))
   
-  sim_day_1 <- wgen_historical_day(sampled_day, n_year = 1, start_month = 10)
-  stopifnot(all(unique(wyear(sim_day_1$SAMPLE_DATE)) %in% sim_years))
-  sim_day_1['SIM_YEAR'] <- i
-  sim_day_1
+  sim_day_1 <- sim_daily(sampled_day, n_year = 1, start_month = 10)
+  stopifnot(all(unique(wyear(sim_day_1$out$SAMPLE_DATE)) %in% sim_years))
+  sim_day_1$out['SIM_YEAR'] <- i
+  sim_day_1$out
 }, mc.cores=6)
 sim_day <- do.call(rbind, sim_day_list)
 sim_day <- mutate(sim_day, DATE=DATE+years(SIM_YEAR-1))
