@@ -9,6 +9,6 @@
 waterday <- function(x, start_month=10) {
   start_jday <- lubridate::yday(lubridate::ymd(paste(2001, start_month, 1, sep='-'))) - 1
   wday <- lubridate::yday(x)-(start_jday+lubridate::leap_year(x))
-  wday <- ifelse(wday<=0, 365+wday+leap_year(x), wday)
+  wday <- ifelse(wday<=0, 365+wday+lubridate::leap_year(x), wday)
   wday
 }
