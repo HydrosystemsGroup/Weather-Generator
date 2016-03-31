@@ -128,7 +128,7 @@ data.frame(WYEAR=time(sim_annual_prcp[['out']]),
            PRCP=zoo::coredata(sim_annual_prcp[['out']])) %>%
   ggplot(aes(WYEAR, PRCP)) +
   geom_line() +
-  geom_hline(yint=mean(obs[['wyr']][['PRCP']]), color='red') +
+  geom_hline(yintercept=mean(obs[['wyr']][['PRCP']]), color='red') +
   geom_text(aes(label=TEXT), data=data.frame(WYEAR=2000, PRCP=mean(obs[['wyr']][['PRCP']]), TEXT="Historical Mean"),
             hjust=0, vjust=-1, color='red') +
   labs(x="Simulation Water Year", y="Annual Precip (mm/yr)", title="Simulated Annual Precipitation")
@@ -174,7 +174,7 @@ sampled_years
 ## ----plot-knn_annual, fig.width=8, fig.height=4--------------------------
 ggplot() +
   geom_point(aes(WYEAR, PRCP, color=SAMPLED), data=obs[['wyr']] %>% mutate(SAMPLED=WYEAR %in% sampled_years)) +
-  geom_hline(yint=sim_annual_prcp[['out']][1], linetype=2, color='red') +
+  geom_hline(yintercept=sim_annual_prcp[['out']][1], linetype=2, color='red') +
   geom_text(aes(x=x, y=y, label=label),
             data=data.frame(x=min(obs[['wyr']][['WYEAR']]),
                             y=sim_annual_prcp[['out']][1],
